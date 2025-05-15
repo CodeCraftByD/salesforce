@@ -1,0 +1,175 @@
+public class SUBS_OpportunityCreationBatch implements Database.Batchable<sObject>, Database.AllowsCallouts, Database.Stateful {
+    Map<String, List<ContractLineItem>> mapContractLineItem = new Map<String, List<ContractLineItem>>();
+    //List<ContractLineItem> lstCLIs = new List<ContractLineItem>(); // Commented by Utkarsh
+    public Integer totalCount = 0;
+    public Integer errorCount = 0;
+    public Integer opportunityCount = 0;
+    private String queryLocatorObject; // Possible values: ContractLineItem, Batch_Staging_Table_Record__c
+    public Set<String> setOfCountries = new Set<String>();
+    private Boolean parallelMode = false;
+    String query;
+    private String queryFilter;
+    private Boolean exceptionLogged = false;
+
+    public SUBS_OpportunityCreationBatch(String queryFilter) {
+        if (!parallelMode) {
+            throwExceptionIfPreviousJobRunning();
+        }
+        this.queryFilter = queryFilter;
+        this.queryLocatorObject = 'ContractLineItem';
+    }
+
+    //Constructor for given object (True_Up__c or Batch_Staging_Table_Record__c) and given filter criteria
+    public SUBS_OpportunityCreationBatch(String queryFilter, String queryLocatorObject) {
+        if (!parallelMode) {
+            throwExceptionIfPreviousJobRunning();
+        }
+        this.queryFilter = queryFilter;
+        if (String.isNotBlank(queryLocatorObject)) {
+            this.queryLocatorObject = queryLocatorObject;
+        } else {
+            this.queryLocatorObject = 'ContractLineItem';
+        }
+    }
+
+    //Constructor for given object (True_Up__c or Batch_Staging_Table_Record__c), filter criteria and parelledMode flag
+    public SUBS_OpportunityCreationBatch(String queryFilter, String queryLocatorObject, Boolean parallelMode) {
+        this(queryFilter, queryLocatorObject);
+        if (parallelMode != null) {
+            this.parallelMode = parallelMode;
+        }
+    }
+
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        query = '';
+        String filterString = '';
+        if (queryLocatorObject == 'ContractLineItem') {
+            query = SUBS_OpportunityCreationUtility.getOdmCliQuery();
+            List<Batch_Job_Setting__mdt> bList = [SELECT Query_Filter__c FROM Batch_Job_Setting__mdt WHERE DeveloperName = 'Create_Subs_Oppty_button_filter'];
+            if (bList.size() > 0) {
+                filterString = bList[0].Query_Filter__c;
+                // AM: Move this filter to setting after QA
+                //filterString += ' and servicecontract.Account.Country_Lookup__r.ODM_Flag__c = true  and Opportunity_Creation_Error__c = \'\' ';
+            }
+            if (String.isNotBlank(filterString) && filterString != '') {
+                query += ' where ' + filterString;
+            }
+            if (String.isNotBlank(queryFilter)) {
+                query += ' and ' + queryFilter;
+            }
+        } else if (queryLocatorObject == 'Batch_Staging_Table_Record__c') {
+            if (String.isBlank(queryFilter)) {
+                List<Batch_Job_Setting__mdt> bList = [SELECT Query_Filter__c FROM Batch_Job_Setting__mdt WHERE DeveloperName = 'Subscription_Opp_Creation_Job_Staging_Table_Query'];
+                if (bList.size() > 0) {
+                    queryFilter = bList[0].Query_Filter__c;
+                } else {
+                    queryFilter = 'Job_Name__c = \'Subscription Opportunity Creation\'';
+                }
+            }
+            query = 'Select Record_Id__c from Batch_Staging_Table_Record__c where ' + queryFilter;
+        }
+        if (String.isBlank(query)) {
+            throw new ExodusException('Query cannot be blank');
+        }
+
+        System.debug(' query >> ' + query);
+        return Database.getQueryLocator(query);
+    }
+
+    public void execute(Database.BatchableContext bc, List<sObject> scope) {
+        Map<Id, ContractLineItem> cliToBeUpdatedMap = new Map<Id, ContractLineItem>();
+        Map<Id, String> cliErrorMessageMap = new Map<Id, String>();
+        List<ContractLineItem> lstCLIs = new List<ContractLineItem>(); // Added by Utkarsh
+        List<Opportunity> createdOpp = new List<Opportunity>();
+        Set<Id> cliIds = new Set<Id>();
+        if (queryLocatorObject == 'ContractLineItem') {
+            for (sObject sObj : scope) {
+                ContractLineItem cli = (ContractLineItem) sObj;
+                lstCLIs.add(cli);
+            }
+        } else if (queryLocatorObject == 'Batch_Staging_Table_Record__c') {
+            for (Batch_Staging_Table_Record__c b : (List<Batch_Staging_Table_Record__c>) scope) {
+                if (String.isNotBlank(b.Record_Id__c)) {
+                    cliIds.add(b.Record_Id__c);
+                }
+            }
+            String cliQuery = SUBS_OpportunityCreationUtility.getOdmCliQuery();
+            cliQuery = cliQuery + ' Where Id In:cliIds';
+            lstCLIs = Database.query(cliQuery);
+        }
+        try {
+            if (!lstCLIs.isEmpty()) {
+                totalCount += lstCLIs.size(); //  Total Count Additional
+                system.debug('lstCLIs>>>>>>' + lstCLIs);
+                SUBS_OpportunityCreationUtility.skipOLITrigger = true;
+                createdOpp = SUBS_OpportunityCreationService.createSubscriptionOpportunities(lstCLIs, true);
+                if (SUBS_OpportunityCreationService.cliErrorMessageMap.size() > 0) {
+                    cliErrorMessageMap.putAll(SUBS_OpportunityCreationService.cliErrorMessageMap);
+                }
+
+                if (DROM_RenewalOpportunityUtility.exceptionLogs.size() > 0) {
+                    for (Batch_Transaction_Log__c bt : DROM_RenewalOpportunityUtility.exceptionLogs) {
+                        cliToBeUpdatedMap.put(bt.Impacted_Record_Id__c, new ContractLineItem(Id = bt.Impacted_Record_Id__c, Opportunity_Creation_Error__c = bt.Error_Type__c));
+                    }
+                }
+            }
+            opportunityCount += createdOpp.size();
+
+            if (cliErrorMessageMap.size() > 0) {
+                errorCount += cliErrorMessageMap.size(); // total Error Count
+                String msg;
+                for (Id cliId : cliErrorMessageMap.keySet()) {
+                    if (cliErrorMessageMap.get(cliId) != null) {
+                        if (cliErrorMessageMap.get(cliId).length() > 100) {
+                            msg = cliErrorMessageMap.get(cliId).subString(0, 100);
+                        } else {
+                            msg = cliErrorMessageMap.get(cliId);
+                        }
+                        cliToBeUpdatedMap.put(cliId, new ContractLineItem(Id = cliId, Opportunity_Creation_Error__c = msg));
+                    }
+                }
+            }
+            if (cliToBeUpdatedMap.size() > 0) {
+                Database.update(cliToBeUpdatedMap.values(), false);
+            }
+        } catch (exception e) {
+            Batch_Transaction_Log__c log = new Batch_Transaction_Log__c(Class_Name__c = 'SUBS_OpportunityCreationBatch', Error_Message__c = e.getMessage() + '--' + e.getLineNumber(), Method_Name__c = 'finish');
+            insert log;
+        }
+    }
+
+    public void finish(Database.BatchableContext bc) {
+        System.debug('Finish Block Executed');
+        Integer successCount = totalCount - errorCount;
+        String message = ' Total Records Processed: ' + totalCount + '\n' + ' Success Record Count: ' + successCount + '\n' + ' Failure Record Count: ' + errorCount + '\n' + ' Total Opportuities Created: ' + opportunityCount;
+
+        Batch_Transaction_Log__c log = new Batch_Transaction_Log__c(
+            Batch_Job_Name__c = 'SUBS_OpportunityCreationBatch',
+            Error_Message__c = message,
+            OwnerId = Userinfo.getUserId()
+            //Error_Type__c = errorType
+        );
+        if (log != null) {
+            insert log;
+        }
+        // Calling the pricing job to populate prices -- Moved to SUBS_PopulateATR_ACVOnOLIBatch finish
+        // SUBS_PopulatePriceOnOpptyBatch b = new SUBS_PopulatePriceOnOpptyBatch(' CreatedDate = today ');
+        // Database.executeBatch(b, 10);
+
+        // Calling ATR Batch
+        if (!Test.isRunningTest()) {
+            SUBS_PopulateATR_ACVOnOLIBatch batchAtr = new SUBS_PopulateATR_ACVOnOLIBatch();
+            Database.executeBatch(batchAtr, 25);
+        }
+    }
+
+    public void throwExceptionIfPreviousJobRunning() {
+        if (!Sf.settings.getBoolean('AIR_GenerationJobAllowParallelJobs', false)) {
+            List<AsyncApexJob> asyncJobs = new List<AsyncApexJob>([SELECT Id, MethodName, JobItemsProcessed, ApexClassId, CompletedDate, Status, ExtendedStatus, TotalJobItems FROM AsyncApexJob WHERE (Status = 'Processing' OR Status = 'Queued' OR Status = 'Preparing' OR Status = 'Holding') AND ApexClassId IN (SELECT Id FROM ApexClass WHERE Name = 'SUBS_OpportunityCreationBatch')]);
+            //Execute the Batch only if no other jobs are running
+            if (asyncJobs.size() > 0 && !Test.isRunningTest()) {
+                throw new CustomException('PREVIOUS_JOB_RUNNING', 'Previous Job(s) is still running');
+            }
+        }
+    }
+}
