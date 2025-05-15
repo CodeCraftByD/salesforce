@@ -1,0 +1,62 @@
+global without sharing class SUBS_PopulatePriceOnOpptyBatch implements Database.Batchable<sObject>, Database.AllowsCallouts, Database.Stateful {
+    private String query;
+    private String filter;
+    public Integer totalOliCount = 0;
+    public Integer failedOliCount = 0;
+
+    public SUBS_PopulatePriceOnOpptyBatch() {
+        System.debug('*');
+    }
+
+    public SUBS_PopulatePriceOnOpptyBatch(String filter) {
+        this.filter = filter;
+    }
+
+    global Database.QueryLocator start(Database.BatchableContext batchContext) {
+        String renewalType = System.Label.Renewal_Status_Types; //CRMEAGLE-1477
+        List<String> renewalTypes = renewalType.split(','); //CRMEAGLE-1477
+        System.debug(renewalTypes);
+        String filterString = '';
+        //Get common fields from method
+        query = 'Select ' + SUBS_OpportunityPriceService.getOLIFieldsToQuery() + ' FROM OpportunityLineItem';
+        List<Batch_Job_Setting__mdt> bList = [SELECT Query_Filter__c FROM Batch_Job_Setting__mdt WHERE DeveloperName = 'Populate_Price_Subs_Oppty_Filter'];
+        if (bList.size() > 0 && String.isNotBlank(bList[0].Query_Filter__c)) {
+            filterString = bList[0].Query_Filter__c;
+        } else {
+            //Querying only records that don't have Srp or Unit Price and don't have Price Error(It would have been populated, if the record was previously processed and there was an error in retrieving the price)
+            filterString = 'Opportunity.RecordType.Name = \'Subscription Opportunity\' AND UnitPrice = 0 AND Opportunity.isClosed = false AND Opportunity.Lock_Opportunity__c = false AND Opportunity.Discount_Approval_Status__c != \'Approved\' ';
+        }
+        if (String.isNotBlank(filter)) {
+            filterString += ' AND ' + filter;
+        }
+        if (String.isNotBlank(filterString)) {
+            query += ' WHERE ' + filterString + ' AND (Renewal_Status__c IN :renewalTypes OR Renewal_Status__c = null)'; //CRMEAGLE-1477
+        }
+        query += ' ORDER BY OpportunityId';
+        System.debug(' query >> ' + query);
+        return Database.getQueryLocator(query);
+    }
+
+    global void execute(Database.BatchableContext batchContext, List<OpportunityLineItem> lsOpptyLineItem) {
+        try {
+            if (!lsOpptyLineItem.isEmpty()) {
+                SUBS_OpportunityPriceService.populatePriceOnOpportunityLineItems(lsOpptyLineItem);
+            }
+        } catch (Exception e) {
+            DROM_RenewalOpportunityUtility.logBatchException(e.getMessage() + ' - ' + e.getStackTraceString(), null, null, 'SUBS_PopulatePriceOnOpptyBatch', 'execute', 'SUBS_PopulatePriceOnOpptyBatch', 'OpportunityLineItem', 'UNHANDLED_EXCEPTION', 'DPPB4', batchContext);
+            failedOliCount++; //  DAASN-22243
+        }
+        // DAASN-21963 changes starts
+        // calling to insert the Batch Transaction Records
+        DROM_RenewalOpportunityUtility.insertBatchExceptions();
+        // DAASN-21963 changes ends
+        totalOliCount += SUBS_OpportunityPriceService.totalOliPriceBatchRecords; // DAASN-22243
+        failedOliCount += SUBS_OpportunityPriceService.failedOliCount; // DAASN-22243
+    }
+
+    global void finish(Database.BatchableContext batchContext) {
+        // Calling to store the execute method record processed details in batch transaction log : DAASN-22243
+        SUBS_OpportunityPriceService.transactionRecDetailsOfPriceBatchEachExecute(totalOliCount, failedOliCount);
+        DROM_RenewalOpportunityUtility.insertBatchExceptions();
+    }
+}
