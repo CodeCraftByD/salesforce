@@ -1,0 +1,656 @@
+public without sharing class SUBS_TransitionSubscriptionOpptyUtility {
+    public static string subscriptionOfferingMissingError = ' Offering does not exist for Line Item ';
+    public static Map<String, Account> resellerAccountMap = new Map<String, Account>();
+
+    //DAASN-21485 - Moved this map as part of optimization
+    public static Map<String, String> actionNameWithValue {
+        public get {
+            if (actionNameWithValue == null) {
+                actionNameWithValue = new Map<String, String>();
+                for (OpportunityLineItem_Mapping__mdt item : OpportunityLineItem_Mapping__mdt.getAll().values()) {
+                    actionNameWithValue.put(item.Action_Name__c, item.Action_Value__c);
+                }
+            }
+            return actionNameWithValue;
+        }
+        private set;
+    }
+
+    /**
+     *  Description       : generate Opportunity Name
+     *  @name             : getSubscriptionOppName
+     *  @param            : ContractLineItem, Opportunity, String
+     *  @throws exception : NONE
+     **/
+    public static String getSubscriptionOppName(ContractLineItem cli, Opportunity opp) {
+        String accountName = cli.ServiceContract.Account.Name;
+        String subsOppName = '';
+        if (resellerAccountMap.size() == 0) {
+            resellerAccountMap = SUBS_OpportunityCreationUtility.getResellerAccountMap(new List<ContractLineItem>{ cli }, 'Indirect');
+        }
+        if (accountName != null && accountName.length() > 80) {
+            accountName = accountName.substring(0, 80);
+        }
+        if (cli.Asset__r.Reseller_Account__c != null && resellerAccountMap.containsKey(cli.Asset__r.Reseller_Account__r.Account_CSN__c)) {
+            subsOppName = accountName + ' - Renewal' + ' - ' + opp.CloseDate.month() + '/' + opp.CloseDate.day() + '/' + opp.CloseDate.year() + ' - ' + cli.Asset__r.Reseller_Account__r.Account_CSN__c;
+        } else {
+            subsOppName = accountName + ' - Renewal' + ' - ' + opp.CloseDate.month() + '/' + opp.CloseDate.day() + '/' + opp.CloseDate.year() + ' - Direct';
+        }
+        //Account Name + Solution Provider CSN + Renewal CLI End date
+        return SubsOppName;
+    }
+
+    /**
+     *  Description       : Insert/Update Opportunity and create Batch Transaction Log Records in case of exception
+     **/
+    @TestVisible
+    public static void handleOpportunityDML(List<Opportunity> opptyList, Boolean isInsert) {
+        Database.SaveResult[] results;
+        if (isInsert) {
+            MJA_OpportunityUtility.SKIP_OPPORTUNITY_TRIGGER = true;
+            results = Database.insert(opptyList, false);
+        } else {
+            MJA_OpportunityUtility.SKIP_OPPORTUNITY_TRIGGER = true;
+            results = Database.update(opptyList, false);
+        }
+        String message = '';
+        Integer i = 0;
+        for (Database.SaveResult result : results) {
+            if (!result.isSuccess()) {
+                if (isInsert) {
+                    message = DROM_ConstantsUtility.OPPORTUNITY_INSERT_DML_ERROR + opptyList[i].name + '\n' + 'Error Message : \n';
+                } else {
+                    message = DROM_ConstantsUtility.OPPORTUNITY_UPDATE_DML_ERROR + opptyList[i].name + '\n' + 'Error Message : \n';
+                }
+                for (Database.Error err : result.getErrors()) {
+                    message += err.getStatusCode() + ' : ' + err.getMessage().replaceall(',', ' -') + '\n';
+                }
+                //This is not actually saved in database. It is just used for identifying records for which the DML failed and for logging errors in the next step.
+                opptyList[i].Integration_Status__c = 'DROM Opportunity DML Error';
+                opptyList[i].Error__c = message;
+            }
+            i++;
+        }
+    }
+
+    /**
+     *  Description       : Returns the Cli Id to Renewal Key Map for the Cli List passes
+     *  @name             : getRenewalKeys
+     **/
+    public static Map<Id, String> getRenewalKeys(List<ContractLineItem> cliList) {
+        Map<Id, String> cliIdKeyMap = new Map<Id, String>();
+        if (resellerAccountMap.size() == 0) {
+            resellerAccountMap = SUBS_OpportunityCreationUtility.getResellerAccountMap(cliList, 'Indirect');
+        }
+        for (ContractLineItem cli : cliList) {
+            cliIdKeyMap.put(cli.Id, getRenewalKey(cli));
+        }
+        return cliIdKeyMap;
+    }
+
+    public static String getRenewalKey(ContractLineItem cli) {
+        String key = '';
+        if (cli != null) {
+            if (resellerAccountMap.size() == 0) {
+                resellerAccountMap = SUBS_OpportunityCreationUtility.getResellerAccountMap(new List<ContractLineItem>{ cli }, 'Indirect');
+            }
+            key = 'SUBSCRIPTION';
+            String accountIdentifier = cli.ServiceContract.Account.Account_Csn__c;
+            String resellerAccountCSN = cli.Asset__r.Reseller_Account__c != null && resellerAccountMap.containsKey(cli.Asset__r.Reseller_Account__r.Account_CSN__c) ? cli.Asset__r.Reseller_Account__r.Account_CSN__c : 'NA';
+            // String contractTerm = DROM_RenewalOpportunityUtility.getContractTerm(cli);
+            String contractTerm = (cli.Asset__c != null) ? cli.Asset__r.Contract_Term__c : null;
+            String contactKeyString = String.isNotBlank(cli.ServiceContract.Contact.Contact_Csn__c) ? cli.ServiceContract.Contact.Contact_Csn__c : cli.ServiceContract.Contact.Email;
+
+            key += '=' + accountIdentifier + '=' + resellerAccountCSN + '=' + contactKeyString + '=' + contractTerm + '=' + DROM_RenewalOpportunityUtility.getFinancialPeriod(cli.Actual_End_Date__c);
+            //DAASN-19646: added scenario for split and merge
+            if (cli != null && cli.Parent_Opportunity__c != null) {
+                if (cli.Split_Opportunity__c == null) {
+                    key += '=' + cli.Parent_Opportunity__c;
+                } else if (cli.Split_Opportunity__c != null && (cli.Split_Opportunity__r.isClosed == false || (cli.Split_Opportunity__r.isClosed == true && cli.Split_Opportunity__r.Reason__c == DROM_ConstantsUtility.OPPORTUNITY_MERGE_REASON && cli.Split_Opportunity__r.Parent_Opportunity_Id__r.isClosed == false))) {
+                    key += '=' + cli.Parent_Opportunity__c;
+                    key += '=' + cli.Split_Opportunity__c;
+                }
+            } //DAASN-19646: changes ends
+        }
+        return key;
+    }
+
+    public static List<OpportunityLineItem> getOpptyLineItemQuery(Set<Id> opportunityIds) {
+        List<OpportunityLineItem> oppLineItems = [
+            SELECT
+                Id,
+                OpportunityId,
+                Additional_Discount_Per__c,
+                Opportunity.Account.Country_Picklist__c,
+                Opportunity.Account.Country_Lookup__r.Country_Code__c,
+                Opportunity.Account.Country_Lookup__c,
+                Opportunity.Primary_Contact__r.Contact_Language__c,
+                Opportunity.CurrencyIsoCode,
+                Opportunity.Originated_from_LC__c,
+                Opportunity.RecordType.Name,
+                Opportunity.Discount_Approval_Status__c,
+                Opportunity.StageName,
+                Opportunity_Country__c,
+                SBQQ__QuoteLine__r.SBQQ__Quote__r.SBQQ__Status__c,
+                SBQQ__QuoteLine__r.SBQQ__Quote__c,
+                Renewal_Status__c,
+                Product2.OfferingId__c,
+                Product2.RecordTypeName__c,
+                Line_Item_Action__c,
+                Intended_Usage__c,
+                Quantity,
+                Access_Model__c,
+                Adjusted_Srp__c,
+                Term__c,
+                Connectivity__c,
+                Service_Plan__c,
+                Billing_Frequency__c,
+                Start_Date__c,
+                New_Term_Start_Date__c,
+                New_Term_End_Date__c,
+                Promotion_Name__c,
+                Total_Discount__c,
+                Additional_Discount_Amount__c,
+                Switch_Price_Condition__c
+            FROM OpportunityLineItem
+            WHERE OpportunityId IN :opportunityIds AND (Unit_SRP__c = NULL OR Unit_SRP__c = 0)
+        ];
+        return oppLineItems;
+    }
+
+    public static Opportunity mapOpportunityFields(ContractLineItem cli, Map<Id, String> cliIdRenewalKeyMap, Boolean isBatch) {
+        Id subRecordTypeId = Schema.SObjectType.Opportunity.getRecordTypeInfosByName().get('Subscription Opportunity').getRecordTypeId();
+
+        Opportunity op = new Opportunity();
+        op.RecordtypeId = subRecordTypeId;
+        op.Online_Renewal_Flag__c = false;
+        op.Stagename = 'Stage 1';
+        op.ForecastCategoryName = 'Commit';
+        op.Forecast_Category__c = 'Commit';
+
+        if (cli.ServiceContract.Supress_Messaging_Flag__c != null && cli.ServiceContract.Supress_Messaging_Flag__c) {
+            op.Suppress_Messaging_Flag__c = cli.ServiceContract.Supress_Messaging_Flag__c;
+        } else {
+            op.Suppress_Messaging_Flag__c = false;
+        }
+        op.AccountId = cli.ServiceContract.AccountId;
+        op.SoldToAccount__c = cli.Asset__r.Account__c;
+        op.Sold_To_Account_CSN__c = cli.Asset__r.Account__r.Account_CSN__c;
+
+        op.Type = 'New';
+        op.Opportunity_Type__c = 'Renewal';
+        op.Opportunity_Key__c = cliIdRenewalKeyMap.get(cli.Id);
+        //op.Opportunity_Classification__c = 'Partner';
+        //op.Fulfillment_Category__c = 'Agency';
+        //Added for CRMEAGLE-422
+        op.Fulfillment_Category__c = cli.Asset__r.Reseller_Account__c != null && resellerAccountMap.containsKey(cli.Asset__r.Reseller_Account__r.Account_CSN__c) ? 'Agency' : 'Direct';
+        op.Opportunity_Classification__c = op.Fulfillment_Category__c == 'Agency' ? 'Partner' : 'Autodesk';
+        op.Partner_Account__c = op.Fulfillment_Category__c == 'Agency' ? resellerAccountMap.get(cli.Asset__r.Reseller_Account__r.Account_CSN__c).Id : null;
+        op.Partner_Type__c = op.Fulfillment_Category__c == 'Agency' ? resellerAccountMap.get(cli.Asset__r.Reseller_Account__r.Account_CSN__c).Partner_Type__c : null;
+
+        if (!isBatch) {
+            op.Manual_Flag__c = true;
+        }
+        //op.Status__c = 'Open';
+        // CRMEAGLE-1521 - Added by Utkarsh for GTM Launch for EMEA currencies- START
+        String countryCode = cli.ServiceContract.Account.Country_Lookup__r.Country_Code__c;
+        String opptyCurrency = '';
+        // String opptyCurrency = (!SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.isEmpty() && SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.containsKey(countryCode)) ? SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.get(countryCode) : SUBS_OpportunityCreationUtility.getOpportunityCurrency(cli.ServiceContract.Account.Country_Picklist__c);
+        // CRMEAGLE-1521 - Added by Utkarsh for GTM Launch for EMEA currencies- END
+        //String opptyCurrency = SUBS_OpportunityCreationUtility.getOpportunityCurrency(cli.ServiceContract.Account.Country_Picklist__c);
+        if (!SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.isEmpty() && SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.containsKey(countryCode)) {
+            op.Is_Multi_Currency_Subs_Opty__c = true;
+            opptyCurrency = SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.get(countryCode);
+        } else {
+            op.Is_Multi_Currency_Subs_Opty__c = cli.ServiceContract.Account.Country_Lookup__r.Default_Currency__c != cli.ServiceContract.Account.Country_Lookup__r.Alternate_Currency__c; // CRMEAGLE-1521 - Multi-Currency Checkbox
+            opptyCurrency = SUBS_OpportunityCreationUtility.getOpportunityCurrency(cli.ServiceContract.Account.Country_Picklist__c);
+        }
+        if (opptyCurrency == '') {
+            op.CurrencyIsoCode = cli.ServiceContract.Account.currencyIsoCode;
+        } else {
+            op.CurrencyIsoCode = opptyCurrency;
+        }
+
+        op.Last_Agreement_Date__c = cli.Actual_end_date__c;
+        op.Primary_Contact__c = cli.ServiceContract.ContactId;
+        op.Asset_End_Date__c = cli.Actual_end_date__c;
+        //op.Term__c = DROM_RenewalOpportunityUtility.getContractTerm(cli);
+        op.Term__c = (cli.Asset__c != null) ? cli.Asset__r.Contract_Term__c : null;
+        op.Expiry_Date__c = DROM_RenewalOpportunityUtility.getExpiryDate(cli);
+        op.Expiration_Date__c = op.Expiry_Date__c;
+        op.CloseDate = cli.Actual_end_date__c;
+        op.Renewal_Type__c = DROM_RenewalOpportunityUtility.getRenewalType(cli);
+        op.Agreement_Numbers__c = cli.ServiceContract.Agreement_Number__c;
+        if ((cli.ServiceContract.Account.Named_Account_Info__c) != null) {
+            op.OwnerId = cli.ServiceContract.Account.OwnerId;
+        } else if (DROM_RenewalOpportunityUtility.geoGenericOwnerMap.get(cli.ServiceContract.Account.Geo__c) != null) {
+            op.OwnerId = DROM_RenewalOpportunityUtility.geoGenericOwnerMap.get(cli.ServiceContract.Account.Geo__c).Id;
+        } else {
+            op.OwnerId = System.label.ROM_GenericRenewalOwnerId;
+        }
+
+        // DAASN-20173 - LC flag migration
+        system.debug('>>> SUBS_OpportunityCreationUtility.lcDuraMap >>> ' + SUBS_OpportunityCreationUtility.lcDuraMap);
+        if (cli.Asset__r.LC_Purchase__c && string.isNotBlank(op.Term__c) && SUBS_OpportunityCreationUtility.lcDuraMap.containsKey(op.Term__c) && cli.StartDate != null && cli.StartDate.addMonths(SUBS_OpportunityCreationUtility.lcDuraMap.get(op.Term__c)) >= Date.today()) {
+            op.Originated_from_LC__c = true;
+        }
+        // DAASN-20173 - LC END
+        op.Parent_Opportunity_ID__c = cli.Parent_Opportunity__c; //DAASN-19646
+        op.Name = SUBS_TransitionSubscriptionOpptyUtility.getSubscriptionOppName(cli, op);
+        return op;
+    }
+
+    public static OpportunityLineItem mapOpportunityLineItemFields(OpportunityLineItem oli, ContractLineItem cli, Map<String, ProductServiceModels.OfferingAndOfferDetail> cliIdOfferingInfoMap, Map<String, Product2> cliIdOfferingProductMap) {
+        /* Moved this method outside as part of optimization - DAASN-21485
+        Map<String, String> actionNameWithValue = new Map<String, String>();
+        for (OpportunityLineItem_Mapping__mdt item : [SELECT id, Action_Name__c, Action_Value__c FROM OpportunityLineItem_Mapping__mdt]) {
+            actionNameWithValue.put(item.Action_Name__c, item.Action_Value__c);
+        }*/
+        OpportunityLineItem olItem = oli;
+
+        olItem.Contract_Line_Item__c = cli.Id;
+        olItem.Line_Item_Action__c = 'Renewal';
+        olItem.Renewal_Status__c = 'Open';
+        olItem.Line_License_Type__c = actionNameWithValue.get(olItem.Line_Item_Action__c);
+        olItem.Product_Type__c = actionNameWithValue.get((cliIdOfferingProductMap.get(cli.Id)).Material_Group__c);
+        olItem.Support_Level__c = ROM_RenewalOpportunityUtility.getSupportProgram(cli.Entitlement__r.Service_Level__c);
+        olItem.TotalPrice = cli.TotalPrice;
+        olItem.Product2Id = cliIdOfferingProductMap.get(cli.Id).Id;
+        olItem.Asset_Product_Line__c = cli.Asset__r.Primary_Product_Line__c;
+        olItem.End_Date__c = cli.Actual_End_Date__c;
+        olItem.New_Term_Start_Date__c = olItem.End_Date__c + 1;
+        ProductServiceModels.Offer offer = new ProductServiceModels.Offer();
+        offer = cliIdOfferingInfoMap.get(cli.Id).offer;
+        olItem.New_Term_End_Date__c = QuoteServiceUtility.getEndDateBasedOnTermAndStartDate(olItem.New_Term_Start_Date__c, cli.Asset__r.Contract_Term_Code__c );
+        olItem.Access_Model__c = offer.accessModel;
+        olItem.Billing_Frequency__c = offer.billingFrequency;
+        olItem.Billing_Type__c = offer.billingType;
+        olItem.Connectivity__c = offer.connectivity;
+        olItem.Connectivity_Interval__c = offer.connectivityInterval;
+        olItem.Intended_Usage__c = offer.intendedUsage;
+        olItem.Service_Plan__c = offer.servicePlanId;
+        olItem.Billing_Behavior__c = offer.billingBehavior;
+
+        if (cli.Asset__r.Switch_Year_PC__c == 'May 2020+' && cli.Asset__r.Program_Type__c == 'M2S') {
+            olItem.Switch_Price_Condition__c = 'MY4';
+        } else {
+            olItem.Switch_Price_Condition__c = cli.Asset__r.Program_Type__c;
+        }
+        if (offer.contractTerm == 'A01') {
+            olItem.Term__c = 'Annual';
+        } else if (offer.contractTerm == 'A06') {
+            olItem.Term__c = '3-Year';
+        }
+        // DAASN-20173 - LC flag migration
+        system.debug('>> SUBS_OpportunityCreationUtility.lcDuraMap >> ' + SUBS_OpportunityCreationUtility.lcDuraMap);
+        if (cli.Asset__r.LC_Purchase__c && string.isNotBlank(olItem.Term__c) && SUBS_OpportunityCreationUtility.lcDuraMap.containsKey(olItem.Term__c) && cli.StartDate != null && cli.StartDate.addMonths(SUBS_OpportunityCreationUtility.lcDuraMap.get(olItem.Term__c)) >= Date.today()) {
+            olItem.LC_In_Effect_Period__c = cli.StartDate.addMonths(SUBS_OpportunityCreationUtility.lcDuraMap.get(olItem.Term__c));
+        }
+        // DAASN-20173 - LC END
+
+        olItem.Quantity = cli.Asset__r.Quantity__c;
+        olItem.Seats_Ref__c = olItem.Quantity;
+        olItem.Estimated_Subscriptions__c = olItem.Quantity;
+        olItem.Is_Transition__c = true;
+
+        return olItem;
+    }
+
+    public static Map<String, Product2> getRenewalOffering(Set<String> productLineCodes) {
+        Map<String, Product2> mOfferProductIdToRecord = new Map<String, Product2>();
+        for (Product2 offeringProd : [SELECT Id, Product_Line_Code__c, OfferingId__c, ProductCode, OfferingCategory__c, BusinessModel__c, Description, Billing_Behavior__c, Contract_Term__c, Deployment_Code__c, Usage_Type__c, Support_Level__c, End_User_Type__c, Material_Group__c FROM Product2 WHERE RecordType.Name = 'Offering' AND ProductCode IN :productLineCodes]) {
+            mOfferProductIdToRecord.put(offeringProd.ProductCode, offeringProd);
+        }
+        return mOfferProductIdToRecord;
+    }
+
+    /**
+     * @description - Method for OpportunityShare Insert
+     * @param - List of OpportunityIds, List of related accountIds
+     */
+    public static Set<String> createOpportunityShare(List<Id> opportunityIds, List<Id> accountIds, Map<Id, Id> groupAccountMap, Database.BatchableContext batchContext, Boolean isBatch) {
+        Set<String> failedOppAccounts = new Set<String>();
+
+        //Role Id to Account Id map
+        Map<id, id> roleAcctMap = new Map<id, id>();
+
+        for (UserRole ur : [SELECT id, name, portalaccountid FROM userrole WHERE portalaccountid IN :accountIds AND name LIKE '%Partner Executive']) {
+            roleAcctMap.put(ur.id, ur.portalaccountid);
+        }
+
+        //Account Id to group Id map
+        Map<id, id> accountGroupMap = new Map<id, id>();
+
+        if (roleAcctMap.size() > 0) {
+            for (Group g : [SELECT relatedid, id FROM group WHERE relatedid IN :roleAcctMap.keySet() AND type = 'RoleAndSubordinates']) {
+                accountGroupMap.put(roleAcctMap.get(g.relatedid), g.id);
+                groupAccountMap.put(g.id, roleAcctMap.get(g.relatedid));
+            }
+        }
+
+        List<OpportunityShare> shares = new List<OpportunityShare>();
+        if (accountGroupMap.size() > 0) {
+            for (Integer i = 0; i < opportunityIds.size(); i++) {
+                if (accountGroupMap.get(accountIds[i]) != null) {
+                    shares.add(new OpportunityShare(opportunityId = opportunityIds[i], userOrGroupId = accountGroupMap.get(accountIds[i]), OpportunityAccessLevel = 'Edit'));
+                }
+            }
+        }
+
+        failedOppAccounts = insertShares(shares, groupAccountMap, batchContext, isBatch);
+
+        return failedOppAccounts;
+    }
+
+    /**
+     * @description - Future Method for OpportunityShare Insert
+     * @param - List of OpportunityIds, List of related accountIds
+     */
+    @future
+    public static void createOpportunityShareFuture(List<Id> opportunityIds, List<Id> accountIds, Map<Id, Id> groupAccountMap) {
+        Map<id, id> roleAcctMap = new Map<id, id>();
+        for (UserRole ur : [SELECT id, name, portalaccountid FROM userrole WHERE portalaccountid IN :accountIds AND name LIKE '%Partner Executive']) {
+            roleAcctMap.put(ur.id, ur.portalaccountid);
+        }
+        Map<id, id> accountGroupMap = new Map<id, id>();
+        if (roleAcctMap.size() > 0) {
+            for (Group g : [SELECT relatedid, id FROM group WHERE relatedid IN :roleAcctMap.keySet() AND type = 'RoleAndSubordinates']) {
+                accountGroupMap.put(roleAcctMap.get(g.relatedid), g.id);
+            }
+        }
+        List<OpportunityShare> shares = new List<OpportunityShare>();
+        if (accountGroupMap.size() > 0) {
+            for (Integer i = 0; i < opportunityIds.size(); i++) {
+                if (accountGroupMap.get(accountIds[i]) != null) {
+                    shares.add(new OpportunityShare(opportunityId = opportunityIds[i], userOrGroupId = accountGroupMap.get(accountIds[i]), OpportunityAccessLevel = 'Edit'));
+                }
+            }
+        }
+
+        insertShares(shares, groupAccountMap, null, false);
+    }
+
+    /**
+     * @description - Method to insert OpportunityShares used by both Future and Normal createOpportunityShare methods
+     * @param - List of OpportunityShares
+     */
+    private static Set<String> insertShares(List<opportunityshare> opsInsertList, Map<Id, Id> groupAccountMap, Database.BatchableContext batchContext, Boolean isBatch) {
+        //Set of OpportunityId - AccountId for which shares have been inserted
+        Set<String> failedOppAccounts = new Set<String>();
+        //In manual process, the entire transaction is failed and rolled back if there is an error. In batch process, errors are logged for the failed records and successful records are processed.
+        if (opsInsertList != null && opsInsertList.size() > 0) {
+            Database.Insert(opsInsertList, true);
+        }
+
+        return failedOppAccounts;
+    }
+
+    /**
+     * @description - Method to query and get existing oppty renewal Keys
+     * @param - List of keys
+     */
+    public static Map<String, Opportunity> getRenewalKeyMap(List<String> cliIdRenewalKeys) {
+        Id subRecordTypeId = Schema.SObjectType.Opportunity.getRecordTypeInfosByName().get('Subscription Opportunity').getRecordTypeId();
+
+        Set<String> renewalKeySet = new Set<String>();
+        renewalKeySet.addAll(cliIdRenewalKeys);
+
+        Map<String, Opportunity> renewalKeyOpportunityMap = new Map<String, Opportunity>();
+        // DAASN-20173 added Originated_from_LC__c, Term__c to query
+        for (Opportunity opp : [
+            SELECT Name, Id, isClosed, currencyisocode, StageName, Opportunity_Number__c, CloseDate, Asset_End_Date__c, Partner_Account__c, Opportunity_Key__c, opportunity_classification__c, SoldToAccount__c, New_Reseller_Account__c, Account.Country_Picklist__c, SoldToAccount__r.Country_Picklist__c, Integration_Status__c, Error__c, Expiry_Date__c, Owner.UserName, Renewal_Type__c, Agreement_Numbers__c, Parent_Opportunity_Id__c, Lock_Opportunity__c, Originated_from_LC__c, Term__c
+            FROM Opportunity
+            WHERE RecordtypeId = :subRecordTypeId AND Opportunity_Key__c IN :renewalKeySet AND isClosed = FALSE
+        ]) {
+            renewalKeyOpportunityMap.put(opp.Opportunity_Key__c, opp);
+        }
+        return renewalKeyOpportunityMap;
+    }
+
+    /**
+     * @description - Method to query and get existing Sales Orders
+     * @param - List of keys
+     */
+    public static Map<string, Id> getSalesOpptyMap(List<ContractLineItem> cliList) {
+        Set<String> salesOrderNums = new Set<String>();
+        Map<string, Id> salesOptyMap = new Map<string, Id>();
+        for (ContractLineItem cli : cliList) {
+            if (!String.isBlank(cli.ServiceContract.SAP_Document_Number__c)) {
+                salesOrderNums.add(cli.ServiceContract.SAP_Document_Number__c);
+            }
+        }
+        for (Opportunity salesOpty : [SELECT id, SAP_Sales_Order_No__c FROM Opportunity WHERE recordtype.name = 'Autodesk Opportunity' AND SAP_Sales_Order_No__c IN :salesOrderNums]) {
+            salesOptyMap.put(salesOpty.SAP_Sales_Order_No__c, salesOpty.id);
+        }
+        return salesOptyMap;
+    }
+    //CRMEAGLE-1001 start
+    public static Map<Id, ContractLineItem> validateCliEithPricebookEntryNotFound(Map<Id, ContractLineItem> cliMap, string recordTypeName) {
+        Set<String> prodLineCodeSet = new Set<String>();
+        Set<String> autodeskCliIds = new Set<String>();
+        Set<String> morCliIds = new Set<String>();
+        Set<String> currencyCodeSet = new Set<String>();
+        Map<ID, String> cliIDCurrencyIsoCode = new Map<ID, String>();
+        for (ContractLineItem cli : cliMap.values()) {
+            System.debug(recordTypeName);
+            if (recordTypeName == 'Indirect' && cli.Asset__r.Product_Line_Code__c != null) {
+                prodLineCodeSet.add(cli.Asset__r.Product_Line_Code__c);
+            } else if (recordTypeName == 'Direct' && cli.Offering_Product_Line_Code__c != null) {
+                prodLineCodeSet.add(cli.Offering_Product_Line_Code__c);
+            } else if (recordTypeName == 'ODM' && cli.OfferingId__r.ProductCode != null) {
+                prodLineCodeSet.add(cli.OfferingId__r.ProductCode);
+            }
+            if (cli.Merchant__c != NULL){
+                morCliIds.add(cli.id);
+            } else {
+                autodeskCliIds.add(cli.Id);
+            }
+            String cliCurrency = '';
+            if (recordTypeName == 'Indirect') {
+                cliCurrency = (!SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.isEmpty() && SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.containsKey(cli.ServiceContract.Account.Country_Lookup__r.Country_Code__c)) ? SUBS_TransitionSubscriptionOpptyService.countryCurrencyMap.get(cli.ServiceContract.Account.Country_Lookup__r.Country_Code__c) : SUBS_OpportunityCreationUtility.getOpportunityCurrency(cli.ServiceContract.Account.Country_Picklist__c);
+            } else if (recordTypeName == 'Direct') {
+                cliCurrency = (!SUBS_TransitionSubsOpptyforDirectService.countryCurrencyMap.isEmpty() && SUBS_TransitionSubsOpptyforDirectService.countryCurrencyMap.containsKey(cli.ServiceContract.Account.Country_Lookup__r.Country_Code__c)) ? SUBS_TransitionSubsOpptyforDirectService.countryCurrencyMap.get(cli.ServiceContract.Account.Country_Lookup__r.Country_Code__c) : SUBS_OpportunityCreationUtility.getOpportunityCurrency(cli.ServiceContract.Account.Country_Picklist__c);
+            }
+            // CRMEAGLE-1427 - Added by Utkarsh - START
+            if (recordTypeName == 'ODM') {
+                currencyCodeSet.add(cli.Subscription_Currency_Code__c);
+                cliIDCurrencyIsoCode.put(cli.id, cli.Subscription_Currency_Code__c);
+            } else if (cliCurrency == '') {
+                // CRMEAGLE-1427 - Added by Utkarsh - END
+                currencyCodeSet.add(cli.ServiceContract.Account.currencyIsoCode);
+                cliIDCurrencyIsoCode.put(cli.id, cli.ServiceContract.Account.currencyIsoCode);
+            } else {
+                currencyCodeSet.add(cliCurrency);
+                cliIDCurrencyIsoCode.put(cli.id, cliCurrency);
+            }
+        }
+        if (recordTypeName == 'Indirect') {
+            SUBS_TransitionSubscriptionOpptyService.pbeMap = SUBS_OpportunityCreationUtility.getPriceBookEntry(autodeskCliIds, prodLineCodeSet, currencyCodeSet);
+        } else if (recordTypeName == 'Direct') {
+            SUBS_TransitionSubsOpptyforDirectService.pbeMap = SUBS_OpportunityCreationUtility.getPriceBookEntry(autodeskCliIds, prodLineCodeSet, currencyCodeSet);
+        } else if (recordTypeName == 'ODM') {
+            SUBS_OpportunityCreationService.pbeMap = SUBS_OpportunityCreationUtility.getPriceBookEntry(autodeskCliIds, prodLineCodeSet, currencyCodeSet);
+        }
+
+        String directPriceBookName = DROM_RenewalOpportunityUtility.getSetting('DirectPriceBookName', 'Direct');
+        for (ContractLineItem cli : cliMap.values()) {
+            id pricebookEntryId;
+            if (recordTypeName == 'Indirect') {
+                pricebookEntryId = SUBS_TransitionSubscriptionOpptyService.pbeMap.get(cli.Asset__r.Product_Line_Code__c + cliIDCurrencyIsoCode.get(cli.id) + directPriceBookName);
+            } else if (recordTypeName == 'Direct') {
+                pricebookEntryId = SUBS_TransitionSubsOpptyforDirectService.pbeMap.get(cli.Offering_Product_Line_Code__c + cliIDCurrencyIsoCode.get(cli.id) + directPriceBookName);
+            } else if (recordTypeName == 'ODM') {
+                pricebookEntryId = SUBS_OpportunityCreationService.pbeMap.get(cli.OfferingId__r.ProductCode + cliIDCurrencyIsoCode.get(cli.id) + directPriceBookName);
+            }
+            if (pricebookEntryId == null) {
+                String priceBookError;
+                if (recordTypeName == 'Indirect') {
+                    priceBookError = DROM_ConstantsUtility.PRICE_BOOK_ENTRY_ERROR + cli.Asset__r.SerialNumber__c + ' - ' + directPriceBookName + ' - ' + cli.Asset__r.Product_Line_Code__c + ' - ' + cliIDCurrencyIsoCode.get(cli.id);
+
+                    DROM_RenewalOpportunityUtility.logBatchException(priceBookError, null, cli.Id, 'SUBS_TransitionSubscriptionOpptyService', 'validateCliEithPricebookEntryNotFound', 'SUBS_TransitionSubsOpptyBatch', 'ContractLineItem', DROM_ConstantsUtility.PRICE_BOOK_ERROR, 'DROS2', SUBS_TransitionSubscriptionOpptyService.batchContext);
+                    cliMap.remove(cli.Id);
+                    SUBS_TransitionSubscriptionOpptyService.cliPriceBookErrorMessageMap.put(cli.Id, priceBookError);
+                } else if (recordTypeName == 'Direct') {
+                    priceBookError = DROM_ConstantsUtility.PRICE_BOOK_ENTRY_ERROR + ' - ' + directPriceBookName + ' - ' + cli.Offering_Product_Line_Code__c + ' - ' + cliIDCurrencyIsoCode.get(cli.id);
+                    DROM_RenewalOpportunityUtility.logBatchException(priceBookError, null, cli.Id, 'SUBS_TransitionSubsOpptyforDirectService', 'validateCliEithPricebookEntryNotFound', 'SUBS_TransitionSubsOpptyBatch', 'ContractLineItem', DROM_ConstantsUtility.PRICE_BOOK_ERROR, 'DROS2', null);
+                    cliMap.remove(cli.Id);
+                    SUBS_TransitionSubsOpptyforDirectService.cliErrorMessageMap.put(cli.Id, priceBookError);
+                } else if (recordTypeName == 'ODM') {
+                    priceBookError = DROM_ConstantsUtility.PRICE_BOOK_ENTRY_ERROR + ' - ' + directPriceBookName + ' - ' + cli.OfferingId__r.ProductCode + ' - ' + cliIDCurrencyIsoCode.get(cli.id);
+                    DROM_RenewalOpportunityUtility.logBatchException(priceBookError, null, cli.Id, 'SUBS_OpportunityCreationService', 'validateCliEithPricebookEntryNotFound', 'SUBS_OpportunityCreationBatch', 'ContractLineItem', DROM_ConstantsUtility.PRICE_BOOK_ERROR, 'DROS2', null);
+                    cliMap.remove(cli.Id);
+                    SUBS_OpportunityCreationService.cliErrorMessageMap.put(cli.Id, priceBookError);
+                }
+            }
+        }
+        return cliMap;
+    }
+    //CRMEAGLE-1001 End
+
+    // Added below method from SUBS_TransitionSubscriptionOpptyService
+    /**
+     *   Description      : update Assets and create Batch Transaction Logs in case of exception **/
+    public static void handleCliDML(List<ContractLineItem> cliInsertList, Map<Id, ContractLineItem> cliMap, Map<Id, String> cliErrorMessageMap, Database.BatchableContext batchContext) {
+        ADSK_ContractLineItemTriggerHandler.skipADSKContractLineItemTrigger = true;
+        Database.SaveResult[] results = Database.update(cliInsertList, false);
+        String message = '';
+        String errorType;
+        Integer i = 0;
+        for (Database.SaveResult result : results) {
+            if (!result.isSuccess()) {
+                message = 'Error in updating COntract line Item ' + cliInsertList[i].Id + ' with Opportunity - ' + cliInsertList[i].Autodesk_Opportunity__c + '\n' + 'Error Message : \n';
+                for (Database.Error err : result.getErrors()) {
+                    message += err.getStatusCode() + ' : ' + err.getMessage().replaceall(',', ' -') + '\n';
+                    errorType = '' + err.getStatusCode();
+                }
+                DROM_RenewalOpportunityUtility.logBatchException(message, null, cliInsertList[i].Id, 'SUBS_TransitionSubscriptionOpptyService', 'updateAssetsWithOpptyReference', 'SUBS_TransitionSubsOpptyBatch', 'ContractLineItem', errorType, 'DROS6', batchContext);
+                cliMap.remove(cliInsertList[i].Id);
+                cliErrorMessageMap.put(cliInsertList[i].Id, message);
+            }
+            i++;
+        }
+    }
+
+    // Added below method from SUBS_TransitionSubscriptionOpptyService
+    public static void handleOpportunityAccountDML(List<Partner> opInsertList, Map<String, Set<Id>> opportunityAccountCLISetMap, Map<Id, ContractLineItem> cliMap, List<ContractLineItem> cliList, Map<Id, Set<Id>> accountOpportunityMap, Database.BatchableContext batchContext) {
+        Database.SaveResult[] results = Database.Insert(opInsertList, false);
+        String message = '';
+        Integer i = 0;
+        String errorType;
+        Set<Id> cliIdSet;
+        ContractLineItem cliTemp;
+        for (Database.SaveResult result : results) {
+            if (!result.isSuccess()) {
+                message = 'Error in inserting Partner record - ' + opInsertList[i].AccountToId + ' - ' + opInsertList[i].OpportunityId + '\n' + 'Error Message : \n';
+                errorType = '';
+                for (Database.Error err : result.getErrors()) {
+                    message += err.getStatusCode() + ' : ' + err.getMessage().replaceall(',', ' -') + '\n';
+                    errorType = '' + err.getStatusCode();
+                }
+                cliIdSet = opportunityAccountCLISetMap.get((String) opInsertList[i].OpportunityId + (String) opInsertList[i].AccountToId);
+                if (cliIdSet != null) {
+                    for (Id cliId : cliIdSet) {
+                        DROM_RenewalOpportunityUtility.logBatchException(message, null, cliId, 'SUBS_TransitionSubscriptionOpptyService', 'createOpportunityAccounts', 'SUBS_TransitionSubsOpptyBatch', 'ContractLineItem', errorType, 'ROS6', batchContext);
+                    }
+                }
+            } else {
+                cliIdSet = opportunityAccountCLISetMap.get((String) opInsertList[i].OpportunityId + (String) opInsertList[i].AccountToId);
+                if (cliIdSet != null) {
+                    for (Id cliId : cliIdSet) {
+                        cliTemp = cliMap.get(cliId);
+                        if (cliTemp != null) {
+                            cliList.add(cliTemp);
+                        }
+                    }
+                }
+                Set<Id> temp;
+                if (accountOpportunityMap.containsKey(opInsertList[i].AccountToId)) {
+                    accountOpportunityMap.get(opInsertList[i].AccountToId).add(opInsertList[i].OpportunityId);
+                } else {
+                    temp = new Set<Id>();
+                    temp.add(opInsertList[i].OpportunityId);
+                    accountOpportunityMap.put(opInsertList[i].AccountToId, temp);
+                }
+            }
+            i++;
+        }
+    }
+
+    // CRMEAGLE-1521 - Method to populate the mapping of Country Code and Currency Code from Custom Setting - GTM Launch for EMEA currencies
+    public static Map<String, String> populateCountryCurrencyCodeMapping() {
+        Map<String, String> countryCurrencyMap = new Map<String, String>();
+        Settings__c customCurrencyCodeSetting = Settings__c.getValues('Subs_EMEA_CountryCurrencyMapping');
+        List<String> countryCurrencyList = (customCurrencyCodeSetting != null && String.isNotBlank(customCurrencyCodeSetting.value1__c)) ? customCurrencyCodeSetting.value1__c.split(',') : new List<String>();
+        for (String countryCurrencyCode : countryCurrencyList) {
+            countryCurrencyMap.put(countryCurrencyCode.substringBefore(':'), countryCurrencyCode.substringAfter(':'));
+        }
+        system.debug('countryCurrencyMap >> ' + countryCurrencyMap);
+        return countryCurrencyMap;
+    }
+
+    // Added below method from SUBS_TransitionSubsOpptyforDirectService
+    /*   Description      : update Prices for Opportunities **/
+    public static void populateOpportunityPrice(List<ContractLineItem> cliList, Map<String, Opportunity> cliIdOpportunityMap) {
+        Set<Id> opportunityIdSet = new Set<Id>();
+        for (ContractLineItem cli : cliList) {
+            if (cliIdOpportunityMap.get(cli.Id) != null) {
+                opportunityIdSet.add(cliIdOpportunityMap.get(cli.Id).Id);
+            }
+        }
+        if (!System.isFuture() && !System.isBatch()) {
+            //do Future call
+            populateOpportunityPrice(opportunityIdSet, false); //DAPSFDCPI-9020
+        }
+    }
+
+    // Added below method from SUBS_TransitionSubsOpptyforDirectService
+    @future(callout=true)
+    private static void populateOpportunityPrice(Set<Id> opportunityIds, Boolean refreshAllLineItems) {
+        if (Sf.settings.getBoolean('EnableMixedEORResponse', false)) {
+            SUBS_OpportunityPriceService.populatePriceOnOpportunityLineItems(opportunityIds, refreshAllLineItems);
+        } else {
+            List<OpportunityLineItem> oppLineItems = [
+                SELECT
+                    Id,
+                    OpportunityId,
+                    Additional_Discount_Per__c,
+                    Opportunity.Account.Country_Picklist__c,
+                    Opportunity.Account.Country_Lookup__r.Country_Code__c,
+                    Opportunity.Account.Country_Lookup__c,
+                    Opportunity.Primary_Contact__r.Contact_Language__c,
+                    Opportunity.CurrencyIsoCode,
+                    Opportunity.Originated_from_LC__c,
+                    Opportunity.RecordType.Name,
+                    Opportunity.Discount_Approval_Status__c,
+                    Opportunity.StageName,
+                    Opportunity_Country__c,
+                    SBQQ__QuoteLine__r.SBQQ__Quote__r.SBQQ__Status__c,
+                    SBQQ__QuoteLine__r.SBQQ__Quote__c,
+                    Renewal_Status__c,
+                    Product2.OfferingId__c,
+                    Product2.RecordTypeName__c,
+                    Line_Item_Action__c,
+                    Intended_Usage__c,
+                    Quantity,
+                    Access_Model__c,
+                    Adjusted_Srp__c,
+                    Term__c,
+                    Connectivity__c,
+                    Service_Plan__c,
+                    Billing_Frequency__c,
+                    Start_Date__c,
+                    New_Term_Start_Date__c,
+                    New_Term_End_Date__c,
+                    Promotion_Name__c,
+                    Total_Discount__c,
+                    Additional_Discount_Amount__c,
+                    Switch_Price_Condition__c
+                FROM OpportunityLineItem
+                WHERE OpportunityId IN :opportunityIds AND (Unit_SRP__c = NULL OR Unit_SRP__c = 0)
+            ];
+            if (oppLineItems.isEmpty() == false) {
+                SUBS_OpportunityPriceService.populatePriceOnOpportunityLineItems(oppLineItems);
+            }
+        }
+    }
+}
