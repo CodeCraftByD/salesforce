@@ -1,0 +1,733 @@
+public without sharing class SUBS_OpportunityPriceService {
+    private static Database.BatchableContext batchContext;
+    private static set<Id> failedOliIdsForPriceBatch; // DAASN-21963
+    public static Integer totalOliPriceBatchRecords = 0; // DAASN-21963
+    public static Integer failedOliCount = 0; //DAASN-22243
+    private static String callingType = ''; // DAASN-21944
+    public static String renewalType = System.Label.Renewal_Status_Types; //CRMEAGLE-1477
+    public static List<String> renewalTypes = renewalType.split(','); //CRMEAGLE-1477
+    public static Boolean noOpenOrEndOfRenewedOLI = false; //CRMEAGLE-1582
+    public static String zeroOLI = 'Unable to update price because there are no open line items in the opportunity'; //CRMEAGLE-1582
+    public static Map<Integer, OpportunityLineItem> errorLineIdToOLIRecord = new Map<Integer, OpportunityLineItem>(); //CRMEAGLE-1582
+    public static String returnValue = ''; //CRMEAGLE-1582
+    public static Boolean successOli = false; //CRMEAGLE-1582
+
+    public static Set<Id> oppId = new Set<ID>();
+
+    public SUBS_OpportunityPriceService(System.Type caller) {
+        // DAASN-21944
+        callingType = string.valueOf(caller); // DAASN-21944
+    } // DAASN-21944
+
+    private static Boolean logBatchException = DROM_RenewalOpportunityUtility.getBooleanSetting('EnablePriceBatchJobErrorLogging', true); //Change this logging
+
+    /*
+     *  Description      : Returns the query string to be used to query OpportunityLineItems for calling populatePriceOnOpportunityLineItems
+     */
+    public static String getOpptyQuery(Boolean refreshAll) {
+        String query = 'Select Id, CurrencyIsoCode, Originated_from_LC__c, Account.Country_Picklist__c, RecordType.Name,Account.Country_Lookup__r.Country_Code__c,Account.Country_Lookup__c, Primary_Contact__r.Contact_Language__c, Merchant__c, Account.Country_Lookup__r.ODM_Flag__c, ';
+        //Added discount approval field as part of DAASN-20750
+        query += '(Select Id,Reference_Subscription_Ids__c,Net_Price__c, Cost_Per_Day__c,Contract_Line_Item__r.Pelican_Subscription_Id__c, Opportunity.Discount_Approval_Status__c, Additional_Discount_Per__c,Product2.OfferingId__c, Line_Item_Action__c, Intended_Usage_Discount__c, Intended_Usage_Discount_Amount__c, Contract_Type_Discount__c, Contract_Type_Discount_Amount__c, Partner_Discounts_Applied__c, Intended_Usage__c, Quantity, Access_Model__c, Adjusted_Srp__c, Term__c, Connectivity__c, Service_Plan__c, Billing_Frequency__c, Start_Date__c, New_Term_Start_Date__c, New_Term_End_Date__c, Promotion_Name__c, Total_Discount__c, Additional_Discount_Amount__c, Switch_Price_Condition__c,Product2.Name, Renewal_Status__c,Annual_Declared_Value__c,Pricing_Method__c,Line_Item_ACV__c,Line_Item_ATR__c,Reference_Subscription__c,Contract_Line_Item__c,Gross_New_ACV__c,Downsell_ACV__c,OpportunityId,Subscription_Annual_Declared_Value__c,Value_Factor_Tier__c,Value_Factor__c,Scope_Details__c, Scope_of_Use__c, Declared_Value_Based_On__c from OpportunityLineItems where (Renewal_Status__c IN :renewalTypes OR Renewal_Status__c = null)';
+        //Refresh only those oppty line items which does not have any price
+        if (!refreshAll) {
+            query += ' and (Unit_SRP__c = null OR Unit_SRP__c = 0)';
+        }
+        query += ') from Opportunity';
+        return query;
+    }
+
+    /*
+     *  Description      : Returns the fields string to be used to query OpportunityLineItems. This will contain main fields, we can add-on other fields if required
+     */
+    public static String getOLIFieldsToQuery() {
+        String fields = 'Id,Reference_Subscription_Ids__c,Net_Price__c, Product2.M_A_Indicator__c, Cost_Per_Day__c, OpportunityId,Additional_Discount_Per__c, Opportunity.AccountId, Opportunity.Account.Country_Picklist__c,Opportunity.Account.Country_Lookup__r.Country_Code__c, Opportunity.Account.Country_Lookup__c, Opportunity.Primary_Contact__r.Contact_Language__c,';
+        fields += 'Opportunity.CurrencyIsoCode, Opportunity.Originated_from_LC__c, Opportunity.RecordType.Name, Opportunity.Discount_Approval_Status__c, Opportunity.StageName, Opportunity_Country__c, SBQQ__QuoteLine__r.SBQQ__Quote__r.SBQQ__Status__c, SBQQ__QuoteLine__r.SBQQ__Quote__c, Renewal_Status__c, Product2.OfferingId__c,';
+        fields += 'Product2.RecordTypeName__c, End_Date__c,Line_Item_Action__c, Intended_Usage__c, Quantity, Access_Model__c, Adjusted_Srp__c, Term__c, Connectivity__c, Service_Plan__c,Billing_Frequency__c, Start_Date__c, New_Term_Start_Date__c, New_Term_End_Date__c, Promotion_Name__c, Total_Discount__c, Additional_Discount_Amount__c, Switch_Price_Condition__c,Product2.Name,Contract_Line_Item__r.Pelican_Order__c,Contract_Line_Item__r.Pelican_Subscription_Id__c ,Pricing_Method__c,Annual_Declared_Value__c,Line_Item_ACV__c,Line_Item_ATR__c,Reference_Subscription__c,Contract_Line_Item__c,Gross_New_ACV__c,Downsell_ACV__c,Subscription_Annual_Declared_Value__c,Value_Factor_Tier__c,Value_Factor__c,';
+        fields += 'Scope_Details__c, Scope_of_Use__c, Declared_Value_Based_On__c, Opportunity.Merchant__c, Opportunity.Account.Country_Lookup__r.ODM_Flag__c, Pending_Transition__c, Contract_Line_Item__r.Migrated_From__c ,Ramp_Deal__c,Intended_Usage_Discount__c, Intended_Usage_Discount_Amount__c, Contract_Type_Discount__c, Contract_Type_Discount_Amount__c, Partner_Discounts_Applied__c ';
+
+        return fields;
+    }
+
+    /*
+     *  Description      : Calls O2P API and populates price on OpportunityLineItem
+     */
+    @AuraEnabled
+    public static ResponseWrapper populatePriceOnOpportunityLineItems(List<Id> opportunityIds) {
+        Set<Id> opportunityIdSet = new Set<Id>();
+        ResponseWrapper lwcResponse = new ResponseWrapper();
+        opportunityIdSet.addAll(opportunityIds);
+        //Pass refreshAll or not
+        String response = populatePriceOnOpportunityLineItems(opportunityIdSet, true);
+        if (response == 'Success') {
+            lwcResponse.success = true;
+        } else {
+            lwcResponse.success = false;
+            if (errorLineIdToOLIRecord.size() > 0 && successOli == true) {
+                lwcResponse.partialSuccess = returnValue;
+            }
+            lwcResponse.errorMessage = response;
+        }
+        return lwcResponse;
+    }
+
+    /*
+     *  Description      : Calls O2P Api and populates price on OpportunityLineItem
+     *                     If refreshAllLineItems is set, price will be fetched for all line items, otherwise it will only be fetched for line items without price.
+     */
+    public static String populatePriceOnOpportunityLineItems(Set<Id> sOpportunityId, Boolean refreshAllLineItems) {
+        String errorMessage = '';
+        try {
+            if (sOpportunityId.size() > 0) {
+                if (Sf.settings.getBoolean('EnableMixedEORResponse', false)) {
+                    List<Opportunity> lsOppty = Database.query(getOpptyQuery(refreshAllLineItems) + ' WHERE Id IN :sOpportunityId');
+                    try {
+                        if (lsOppty.size() > 0) {
+                            populatePriceOnOpportunityLineItems(lsOppty);
+                            //CRMEAGLE-1582 start
+                            if (noOpenOrEndOfRenewedOLI) {
+                                return zeroOLI;
+                            } else if (errorLineIdToOLIRecord.size() > 0) {
+                                String dot = errorLineIdToOLIRecord.size() == 1 ? '' : '*';
+                                Integer k = 0;
+                                for (Integer i : errorLineIdToOLIRecord.keySet()) {
+                                    OpportunityLineItem tempOLI = errorLineIdToOLIRecord.get(i);
+                                    returnValue = K == 0 ? dot + '    ' + tempOLI.Product2.name + '-' + tempOLI.Price_Error__c : returnValue + '\n' + dot + '    ' + tempOLI.Product2.name + '-' + tempOLI.Price_Error__c;
+                                    k++;
+                                }
+                                return successOli == true ? 'Success' : returnValue;
+                            } else {
+                                //CRMEAGLE-1582 end
+                                return 'Success';
+                            } //CRMEAGLE-1582
+                        }
+                    } catch (Exception e) {
+                        //  errorMessage = e.getMessage() + ' - ' + e.getStackTraceString(); //CRMEAGLE-1582
+                        errorMessage = e.getMessage(); //CRMEAGLE-1582
+                    }
+                } else {
+                    List<OpportunityLineItem> oppLineItems = Database.query('SELECT ' + SUBS_OpportunityPriceService.getOLIFieldsToQuery() + ' FROM OpportunityLineItem WHERE (Renewal_Status__c IN :renewalTypes OR Renewal_Status__c = null) AND OpportunityId IN: sOpportunityId');
+                    try {
+                        if (oppLineItems.isEmpty() == false) {
+                            populatePriceOnOpportunityLineItems(oppLineItems);
+                            return 'Success';
+                        }
+                    } catch (Exception e) {
+                        errorMessage = e.getMessage() + ' - ' + e.getStackTraceString();
+                    }
+                }
+
+                List<Opportunity> oppList = new List<Opportunity>();
+                //Check if below is required, because price error and these should come in O2P service response
+                for (Opportunity opp : [SELECT Id, Price_Refresh_In_Progress__c, Error__c, (SELECT OpportunityId, Asset_Serial_Number__c, Price_Error__c, Pricing_Method__c, Annual_Declared_Value__c, Line_Item_Action__c, Line_Item_ACV__c, Line_Item_ATR__c, Reference_Subscription__c, Contract_Line_Item__c, Gross_New_ACV__c, Downsell_ACV__c, Subscription_Annual_Declared_Value__c, Value_Factor_Tier__c, Value_Factor__c FROM OpportunityLineItems) FROM Opportunity WHERE Id IN :sOpportunityId]) {
+                    opp.Price_Refresh_In_Progress__c = false;
+                    opp.Error__c = null;
+                    if (String.isNotBlank(errorMessage)) {
+                        opp.Error__c = errorMessage;
+                    }
+                    oppList.add(opp);
+                }
+                Database.update(oppList, true);
+            }
+        } catch (Exception e) {
+            Exception__c exceptionLog = new Exception__c(Class__c = 'SUB_OpportunityPriceService', Method__c = 'populatePriceOnOpportunityLineItems', Message__c = 'Error Message: ' + e.getMessage() + '-' + e.getStackTraceString());
+            insert exceptionLog;
+            return e.getMessage();
+        }
+        return errorMessage;
+    }
+    public static Map<String, String> getTermCodeConversions() {
+        Map<String, String> mTermNameToCode = new Map<String, String>();
+        Settings__c termInfo = Settings__c.getValues('Term_Code_Conversion');
+        for (String s : termInfo.Value1__c.split(';')) {
+            mTermNameToCode.put(s.split(':')[1], s.split(':')[0]);
+        }
+        return mTermNameToCode;
+    }
+    public static Settings__c getSubsO2PPriceDate() {
+        Settings__c customDateSetting = Settings__c.getValues('Subs_O2P_PriceDate');
+        return customDateSetting;
+    }
+
+    /*
+     *  Description      : Calls O2P API and populates price on OpportunityLineItem based on Opportunity
+     */
+    public static void populatePriceOnOpportunityLineItems(List<Opportunity> lsOppty) {
+        Map<Integer, OpportunityLineItem> mLineIdToOLIRecord = new Map<Integer, OpportunityLineItem>();
+        List<PriceServiceModels.GetContextualPriceRequest> lsGCPRequest = new List<PriceServiceModels.GetContextualPriceRequest>();
+        Map<String, String> mTermNameToCode = getTermCodeConversions();
+        Settings__c customDateSetting = getSubsO2PPriceDate();
+
+        String customPriceDate = getCustomPriceDate(customDateSetting);
+        List<String> customDateCountryList = getCustomDateCountryList(customDateSetting);
+
+        Integer i = 1;
+
+        for (Opportunity oppty : lsOppty) {
+            PriceServiceModels.GetContextualPriceRequest gcpRequest = createGCPRequest(oppty, customPriceDate, customDateCountryList);
+            if (oppty.OpportunityLineItems.size() > 0) {
+                processLineItems(oppty, mTermNameToCode, gcpRequest, mLineIdToOLIRecord, i);
+                lsGCPRequest.add(gcpRequest);
+            }
+        }
+
+        if (lsGCPRequest.size() > 0) {
+            List<PriceServiceModels.GetContextualPriceResponse> lsGCPResponse = callPriceService(lsGCPRequest);
+            mapPriceAndUpdateOpportunityLineItem(lsGCPResponse, mLineIdToOLIRecord);
+        }
+    }
+
+    @TestVisible
+    private static PriceServiceModels.GetContextualPriceRequest createGCPRequest(Opportunity oppty, String customPriceDate, List<String> customDateCountryList) {
+        PriceServiceModels.GetContextualPriceRequest gcpRequest = new PriceServiceModels.GetContextualPriceRequest();
+
+        gcpRequest.country = getCountryCode(oppty);
+        gcpRequest.priceCurrency = oppty.CurrencyIsoCode;
+        gcpRequest.priceDate = customDateCountryList.contains(gcpRequest.country) ? customPriceDate : String.valueOf(Date.today());
+        gcpRequest.salesChannelCode = determineSalesChannel(oppty);
+        gcpRequest.salesPlatformCode = determineSalesPlatform(gcpRequest.salesChannelCode);
+
+        gcpRequest.lineItems = new List<PriceServiceModels.LineItem>();
+
+        return gcpRequest;
+    }
+
+    @TestVisible
+    private static String getCountryCode(Opportunity oppty) {
+        if (oppty.Account.Country_Lookup__c != null && oppty.Account.Country_Lookup__r.Country_Code__c != null) {
+            return oppty.Account.Country_Lookup__r.Country_Code__c;
+        } else {
+            Country__c objCountry = PriceServiceHelper.getCountryRecByName(oppty.Account.Country_Picklist__c);
+            return objCountry != null ? objCountry.Country_Code__c : null;
+        }
+    }
+
+    @TestVisible
+    private static String determineSalesChannel(Opportunity oppty) {
+        return (oppty.Merchant__c != null && !oppty.Account.Country_Lookup__r.ODM_Flag__c) ? Sf.settings.getString('Sales_SalesChannelCode_Indirect', 'Indirect') : Sf.settings.getString('Sales_SalesChannelCode', 'direct');
+    }
+
+    @TestVisible
+    private static String determineSalesPlatform(String salesChannelCode) {
+        return salesChannelCode == 'Indirect' ? Sf.settings.getString('Sales_SalesPlatformCode_exc', 'EXC') : Sf.settings.getString('Sales_SalesPlatformCode', 'CPQ');
+    }
+
+    @TestVisible
+    private static void processLineItems(Opportunity oppty, Map<String, String> mTermNameToCode, PriceServiceModels.GetContextualPriceRequest gcpRequest, Map<Integer, OpportunityLineItem> mLineIdToOLIRecord, Integer i) {
+        Map<String, Integer> refSubsIdToSwitchToItemId = SUBS_OpportunityPriceServiceUtility.getSwitchToItemId(oppty.OpportunityLineItems);
+
+        for (OpportunityLineItem oli : oppty.OpportunityLineItems) {
+            String orderContext = oppty.Originated_from_LC__c == true ? 'LC' : '';
+            String term = mTermNameToCode.containsKey(oli.Term__c) ? mTermNameToCode.get(oli.Term__c) : oli.Term__c;
+            Date startDate = oli.New_Term_Start_Date__c != null ? oli.New_Term_Start_Date__c : oli.Start_Date__c;
+
+            gcpRequest = SUBS_OpportunityPriceServiceUtility.prepareGCPReqbody(oli, orderContext, term, 'en_US', startDate, i, gcpRequest, refSubsIdToSwitchToItemId);
+
+            mLineIdToOLIRecord.put(i, oli);
+            i++;
+        }
+    }
+
+    @TestVisible
+    private static List<PriceServiceModels.GetContextualPriceResponse> callPriceService(List<PriceServiceModels.GetContextualPriceRequest> lsGCPRequest) {
+        PriceServiceHelper.context = QuoteServiceUtility.GCP_CALL_FROM_OPPORTUNITY;
+        List<PriceServiceModels.GetContextualPriceResponse> lsGCPResponse = new List<PriceServiceModels.GetContextualPriceResponse>();
+
+        for (PriceServiceModels.GetContextualPriceRequest gcpRequest : lsGCPRequest) {
+            PriceServiceModels.GetContextualPriceResponse gcpResponse = PriceServiceHelper.getContextualPricev2(gcpRequest);
+            lsGCPResponse.add(gcpResponse);
+        }
+
+        return lsGCPResponse;
+    }
+
+    /*
+     *  Description      : Calls O2P API and populates price on OpportunityLineItem based on OLI, added as part of DAASN-20750
+     */
+    public static void populatePriceOnOpportunityLineItems(List<OpportunityLineItem> lsOpptyLineItem) {
+        failedOliIdsForPriceBatch = new Set<Id>(); //DAASN-22243
+        Map<Integer, OpportunityLineItem> mLineIdToOLIRecord = new Map<Integer, OpportunityLineItem>();
+        List<PriceServiceModels.GetContextualPriceRequest> lsGCPRequest = new List<PriceServiceModels.GetContextualPriceRequest>();
+        List<OpportunityLineItem> lsCatchedOLIRecord = new List<OpportunityLineItem>();
+        Map<String, String> mTermNameToCode = getTermCodeConversions();
+        Settings__c customDateSetting = getSubsO2PPriceDate();
+        String customPriceDate = getCustomPriceDate(customDateSetting);
+        List<String> customDateCountryList = getCustomDateCountryList(customDateSetting);
+        totalOliPriceBatchRecords += lsOpptyLineItem.size();
+        Integer i = 1;
+        String tempOpptyId;
+        PriceServiceModels.GetContextualPriceRequest gcpRequest;
+        Map<String, Integer> refSubsIdToSwitchToItemId = SUBS_OpportunityPriceServiceUtility.getSwitchToItemId(lsOpptyLineItem);
+
+        // Process each OpportunityLineItem
+        for (OpportunityLineItem oli : lsOpptyLineItem) {
+            if (tempOpptyId == oli.OpportunityId) {
+                gcpRequest = processExistingOpportunityLineItem(oli, gcpRequest, mTermNameToCode, i, refSubsIdToSwitchToItemId, customPriceDate, customDateCountryList);
+            } else {
+                if (gcpRequest != null) {
+                    lsGCPRequest.add(gcpRequest);
+                }
+                gcpRequest = processNewOpportunityLineItem(oli, mTermNameToCode, i, refSubsIdToSwitchToItemId, customPriceDate, customDateCountryList);
+            }
+            mLineIdToOLIRecord.put(i, oli);
+            i++;
+            tempOpptyId = oli.OpportunityId;
+        }
+
+        // Finalize request list
+        if (gcpRequest != null) {
+            lsGCPRequest.add(gcpRequest);
+        }
+
+        // Get and handle GCP response
+        handleGCPResponse(lsGCPRequest, mLineIdToOLIRecord, lsCatchedOLIRecord);
+    }
+
+    @TestVisible
+    private static String getCustomPriceDate(Settings__c customDateSetting) {
+        return (customDateSetting != null && String.isNotBlank(customDateSetting.value1__c)) ? customDateSetting.value1__c : String.valueOf(Date.today());
+    }
+
+    @TestVisible
+    private static List<String> getCustomDateCountryList(Settings__c customDateSetting) {
+        return (customDateSetting != null && String.isNotBlank(customDateSetting.value2__c)) ? customDateSetting.value2__c.split(',') : new List<String>();
+    }
+
+    @TestVisible
+    private static PriceServiceModels.GetContextualPriceRequest processExistingOpportunityLineItem(OpportunityLineItem oli, PriceServiceModels.GetContextualPriceRequest gcpRequest, Map<String, String> mTermNameToCode, Integer i, Map<String, Integer> refSubsIdToSwitchToItemId, String customPriceDate, List<String> customDateCountryList) {
+        String languageCode = 'en_US';
+        String orderContext = oli.Opportunity.Originated_from_LC__c == true ? 'LC' : '';
+        String term = mTermNameToCode.containsKey(oli.Term__c) ? mTermNameToCode.get(oli.Term__c) : oli.Term__c;
+        Date startDate = oli.New_Term_Start_Date__c != null ? oli.New_Term_Start_Date__c : oli.Start_Date__c;
+
+        return SUBS_OpportunityPriceServiceUtility.prepareGCPReqbody(oli, orderContext, term, languageCode, startDate, i, gcpRequest, refSubsIdToSwitchToItemId);
+    }
+
+    @TestVisible
+    private static PriceServiceModels.GetContextualPriceRequest processNewOpportunityLineItem(OpportunityLineItem oli, Map<String, String> mTermNameToCode, Integer i, Map<String, Integer> refSubsIdToSwitchToItemId, String customPriceDate, List<String> customDateCountryList) {
+        PriceServiceModels.GetContextualPriceRequest gcpRequest = new PriceServiceModels.GetContextualPriceRequest();
+        setCountryCode(oli, gcpRequest);
+        gcpRequest.priceCurrency = oli.Opportunity.CurrencyIsoCode;
+        gcpRequest.priceDate = customDateCountryList.contains(gcpRequest.country) ? customPriceDate : String.valueOf(Date.today());
+        gcpRequest.salesChannelCode = getSalesChannelCode(oli);
+        gcpRequest.salesPlatformCode = getSalesPlatformCode(gcpRequest);
+        gcpRequest.lineItems = new List<PriceServiceModels.LineItem>();
+
+        String languageCode = 'en_US';
+        String orderContext = oli.Opportunity.Originated_from_LC__c == true ? 'LC' : '';
+        String term = mTermNameToCode.containsKey(oli.Term__c) ? mTermNameToCode.get(oli.Term__c) : oli.Term__c;
+        Date startDate = oli.New_Term_Start_Date__c != null ? oli.New_Term_Start_Date__c : oli.Start_Date__c;
+
+        return SUBS_OpportunityPriceServiceUtility.prepareGCPReqbody(oli, orderContext, term, languageCode, startDate, i, gcpRequest, refSubsIdToSwitchToItemId);
+    }
+
+    @TestVisible
+    private static void setCountryCode(OpportunityLineItem oli, PriceServiceModels.GetContextualPriceRequest gcpRequest) {
+        if (oli.Opportunity.Account.Country_Lookup__c != null && oli.Opportunity.Account.Country_Lookup__r.Country_Code__c != null) {
+            gcpRequest.country = oli.Opportunity.Account.Country_Lookup__r.Country_Code__c;
+        } else {
+            Country__c objCountry = PriceServiceHelper.getCountryRecByName(oli.Opportunity.Account.Country_Picklist__c);
+            if (objCountry != null) {
+                gcpRequest.country = objCountry.Country_Code__c;
+            }
+        }
+    }
+
+    @TestVisible
+    private static String getSalesChannelCode(OpportunityLineItem oli) {
+        return (oli.Opportunity.Merchant__c != null && !oli.Opportunity.Account.Country_Lookup__r.ODM_Flag__c) ? Sf.settings.getString('Sales_SalesChannelCode_Indirect', 'Indirect') : Sf.settings.getString('Sales_SalesChannelCode', 'direct');
+    }
+
+    @TestVisible
+    private static String getSalesPlatformCode(PriceServiceModels.GetContextualPriceRequest gcpRequest) {
+        return gcpRequest.salesChannelCode == 'Indirect' ? Sf.settings.getString('Sales_SalesPlatformCode_exc', 'EXC') : Sf.settings.getString('Sales_SalesPlatformCode', 'CPQ');
+    }
+
+    @TestVisible
+    private static void handleGCPResponse(List<PriceServiceModels.GetContextualPriceRequest> lsGCPRequest, Map<Integer, OpportunityLineItem> mLineIdToOLIRecord, List<OpportunityLineItem> lsCatchedOLIRecord) {
+        List<PriceServiceModels.GetContextualPriceResponse> lsGCPResponse = new List<PriceServiceModels.GetContextualPriceResponse>();
+        PriceServiceHelper.context = QuoteServiceUtility.GCP_CALL_FROM_OPPORTUNITY;
+
+        for (PriceServiceModels.GetContextualPriceRequest gcpReq : lsGCPRequest) {
+            try {
+                PriceServiceModels.GetContextualPriceResponse gcpResponse = PriceServiceHelper.getContextualPricev2(gcpReq);
+                lsGCPResponse.add(gcpResponse);
+            } catch (Exception ex) {
+                handleErrorForFailedItems(gcpReq, ex, lsCatchedOLIRecord, mLineIdToOLIRecord);
+            }
+        }
+
+        if (!lsCatchedOLIRecord.isEmpty()) {
+            handleOliUpdate(lsCatchedOLIRecord); // DAASN-21963 changes
+        }
+        mapPriceAndUpdateOpportunityLineItem(lsGCPResponse, mLineIdToOLIRecord);
+    }
+
+    @TestVisible
+    private static void handleErrorForFailedItems(PriceServiceModels.GetContextualPriceRequest gcpReq, Exception ex, List<OpportunityLineItem> lsCatchedOLIRecord, Map<Integer, OpportunityLineItem> mLineIdToOLIRecord) {
+        for (PriceServiceModels.LineItem lineItemRec : gcpReq.lineItems) {
+            OpportunityLineItem oliRecord = mLineIdToOLIRecord.get(lineItemRec.id);
+            OpportunityLineItem tempOLI = new OpportunityLineItem(); //Create a new instance to avoid querying all fields
+            tempOLI.Id = oliRecord.Id;
+            tempOLI.Price_Error__c = ex.getMessage();
+            lsCatchedOLIRecord.add(tempOLI);
+            failedOliIdsForPriceBatch.add(oliRecord.Id); // storing the failed Oli records DAASN-21963
+        }
+    }
+
+    /*
+     *  Description      : Calls GetMyPrice Api and populates price on OpportunityLineItem
+     */
+    public static void mapPriceAndUpdateOpportunityLineItem(List<PriceServiceModels.GetContextualPriceResponse> lsGCPResponse, Map<Integer, OpportunityLineItem> mLineIdToOLIRecord) {
+        List<OpportunityLineItem> lsOLIUpdate = new List<OpportunityLineItem>();
+        Set<Integer> sOLILineIdFound = new Set<Integer>();
+        Set<String> sEligibleDiscountStatus = new Set<String>{ 'Expired', 'Rejected', 'Not Submitted', null };
+
+        for (PriceServiceModels.GetContextualPriceResponse gcpResponse : lsGCPResponse) {
+            processGCPResponse(gcpResponse, mLineIdToOLIRecord, lsOLIUpdate, sOLILineIdFound, sEligibleDiscountStatus);
+        }
+
+        //  updateOLIsNotReturned(mLineIdToOLIRecord, sOLILineIdFound, lsOLIUpdate);
+        handleOLIUpdates(lsOLIUpdate);
+        //  updateAtrOnOli(oppId);
+    }
+
+    @TestVisible
+    private static void processGCPResponse(PriceServiceModels.GetContextualPriceResponse gcpResponse, Map<Integer, OpportunityLineItem> mLineIdToOLIRecord, List<OpportunityLineItem> lsOLIUpdate, Set<Integer> sOLILineIdFound, Set<String> sEligibleDiscountStatus) {
+        for (PriceServiceModels.ContextualPrice price : gcpResponse.prices) {
+            if (mLineIdToOLIRecord.containsKey(price.lineItemID) && mLineIdToOLIRecord.get(price.lineItemID) != null) {
+                OpportunityLineItem queriedOLI = mLineIdToOLIRecord.get(price.lineItemID);
+                OpportunityLineItem tempOLI = new OpportunityLineItem(); //Create a new instance such that you don't have to query all the fields
+                Boolean executeBlockEOR = false; //CRMEAGLE-1582
+                Boolean executeBlock = false; //CRMEAGLE-1582
+                tempOLI.Id = queriedOLI.Id;
+                tempOLI.Line_Item_Action__c = queriedOLI.Line_Item_Action__c;
+                tempOLI.New_Term_Start_Date__c = queriedOLI.New_Term_Start_Date__c;
+                tempOLI.New_Term_End_Date__c = queriedOLI.New_Term_End_Date__c;
+                //handle the exceptions
+                if (price.code != null) {
+                    tempOLI.Price_Error__c = price.code == 'O2PNS300' ? 'Suggested retail price not found' : price.detail; //CRMEAGLE-1582
+                    if (price.code == 'O2PES100') {
+                        tempOLI.Renewal_Status__c = 'End of Sale';
+                    } else if (price.code == 'O2PER200') {
+                        tempOLI.Renewal_Status__c = 'End of Renewal';
+                        executeBlockEOR = true; //CRMEAGLE-1582
+                    }
+                    tempOLI.Product2 = queriedOLI.Product2; //CRMEAGLE-1582
+                    errorLineIdToOLIRecord.put(price.lineItemID, tempOLI); //CRMEAGLE-1582
+                } else if (sEligibleDiscountStatus.contains(queriedOLI.Opportunity.Discount_Approval_Status__c)) {
+                    //Update the price only when Discount_Approval_Status__c IN (\'Expired\', \'Rejected\', \'Not Submitted\', null), else update EOS/EOR fields --> DAASN-20750
+
+                    tempOLI.Price_Error__c = null;
+                    executeBlock = true; //CRMEAGLE-1582
+                    successOli = true; //CRMEAGLE-1582
+                }
+                tempOLI.Price_Region_Code__c = gcpResponse?.priceRegion;
+                //CRMEAGLE-1582 start This block should also be executed in EOR case as well to set price to zero which is passed from o2p
+                createTempOLI(executeBlockEOR, executeBlock, tempOLI, price);
+                //changes for DAASN-20750 ends
+
+                oppId.add(queriedOLI.OpportunityId); //CRMEAGLE-1875
+                lsOLIUpdate.add(tempOLI);
+                sOLILineIdFound.add(price.lineItemID);
+            }
+        }
+
+        //Update the OLI for which pricing not found
+        for (Integer i : mLineIdToOLIRecord.keySet()) {
+            if (!sOLILineIdFound.contains(i)) {
+                OpportunityLineItem queriedOLI = mLineIdToOLIRecord.get(i);
+                OpportunityLineItem tempOLI = new OpportunityLineItem(); //Create a new instance such that you don't have to query all the fields
+                tempOLI.Id = queriedOLI.Id;
+                tempOLI.Price_Error__c = 'Line Item not returned';
+                lsOLIUpdate.add(tempOLI);
+                failedOliIdsForPriceBatch.add(queriedOLI.Id); // storing the failed oli record Ids // DAASN-21963
+                tempOLI.Product2 = queriedOLI.Product2; //CRMEAGLE-1582
+                errorLineIdToOLIRecord.put(i, tempOLI); //CRMEAGLE-1582
+            }
+        }
+    }
+
+    @TestVisible
+    private static void createTempOLI(Boolean executeBlockEOR, Boolean executeBlock, OpportunityLineItem tempOLI, PriceServiceModels.ContextualPrice price) {
+        if (executeBlockEOR == true || executeBlock == true) {
+            tempOLI.Unit_SRP__c = price.unitSRP;
+            tempOLI.Extended_SRP__c = price.extendedSRP;
+            tempOLI.Special_Program_Discount_Amount__c = price.specialProgramDiscountAmount;
+            tempOLI.Renewal_Discount_Percent__c = price.renewalDiscountPercent;
+            tempOLI.Renewal_Discount_Amount__c = price.renewalDiscountAmount;
+            tempOLI.Transaction_Volume_Discount_Percentage__c = price.transactionVolumeDiscountPercent;
+            tempOLI.Transaction_Volume_Discount__c = price.transactionVolumeDiscountAmount;
+            tempOLI.Service_Duration_Discount_Percent__c = price.serviceDurationDiscountPercent;
+            tempOLI.Service_Duration_Discount_Amount__c = price.serviceDurationDiscountAmount;
+            tempOLI.Promotion_Discount_Percent__c = price.promotionDiscountPercent;
+            tempOLI.Promotion_Discount_Amount__c = price.promotionDiscountAmount;
+            tempOLI.Extended_Discount_Srp__c = price.extendedDiscountedSRP;
+            tempOLI.Total_Adjusted_SRP__c = price.extendedDiscountedSRP;
+            tempOLI.Adjusted_SRP__c = (tempOLI.Total_Adjusted_SRP__c != null) ? tempOLI.Total_Adjusted_SRP__c / price.itemQuantity : 0;
+            tempOLI.UnitPrice = tempOLI.Line_Item_Action__c == 'Trade-in' ? price.endUserPrice / price.itemQuantity : tempOLI.Adjusted_SRP__c;
+            tempOLI.DiscountsApplied__c = price.discountsApplied;
+            //tempOLI.TotalPrice = price.endUserPrice;
+            tempOLI.Calculated_Net_Price__c = price.endUserPrice;
+            tempOLI.Additional_Discount_Per__c = price.endUserAdditionalDiscountPercent;
+            tempOLI.Additional_Discount_Amount__c = price.endUserAdditionalDiscountAmount;
+            if (price.switchPriceCondition != null) {
+                tempOLI.Switch_Price_Condition__c = price.switchPriceCondition;
+                tempOLI.Special_Program_Description__c = price.specialProgramDescription;
+            } else {
+                tempOLI.Switch_Price_Condition__c = null;
+                tempOLI.Special_Program_Description__c = null;
+            }
+            if (price.billPlans != null && price.billPlans.size() > 0) {
+                tempOLI.BillPlans__c = JSON.serialize(price.billPlans);
+            }
+            if (price.planPrice != null) {
+                tempOLI.PlanPriceWaterfall__c = JSON.serialize(price.planPrice);
+            }
+            tempOLI.ExclusiveDiscountsApplied__c = price.exclusiveDiscountsApplied;
+            tempOLI.DiscountsApplied__c = price.discountsApplied;
+            //CRMEAGLE-3215 - START
+            tempOLI.Intended_Usage_Discount__c = price.intendedUsageDiscountPercent;
+            tempOLI.Intended_Usage_Discount_Amount__c = price.intendedUsageDiscountAmount;
+            tempOLI.Contract_Type_Discount__c = price.businessTypeDiscountPercent;
+            tempOLI.Contract_Type_Discount_Amount__c = price.businessTypeDiscountAmount;
+            tempOLI.Partner_Discounts_Applied__c = price.partnerDiscountsApplied;
+            //CRMEAGLE-3215 - END
+        }
+        //CRMEAGLE-1582 end
+
+        if (price.annualDeclaredValue != null) {
+            tempOLI.Annual_Declared_Value__c = price.annualDeclaredValue;
+        }
+        if (price.valueFactorTier != null) {
+            tempOLI.Value_Factor_Tier__c = String.valueof(price.valueFactorTier);
+        }
+        if (price.valueFactor != null) {
+            tempOLI.Value_Factor__c = price.valueFactor;
+        }
+        //Update the EOR/EOS data, added as part of DAASN-20750
+        tempOLI.EndOfSaleDate__c = price.endOfSaleDate != null ? Date.valueOf(price.endOfSaleDate) : null;
+        tempOLI.EndofRenewalDate__c = price.endOfRenewalDate != null ? Date.valueOf(price.endOfRenewalDate) : null;
+    }
+
+    @TestVisible
+    private static void handleOLIUpdates(List<OpportunityLineItem> lsOLIUpdate) {
+        if (lsOLIUpdate.size() > 0) {
+            handleOpportunityLineItemDML(lsOLIUpdate, System.isBatch());
+        }
+    }
+
+    /*
+     *  Description      : Updates OLI and create Batch Transaction Logs in case of exception
+     */
+    @TestVisible
+    private static void handleOpportunityLineItemDML(List<OpportunityLineItem> oliItemList, Boolean isBatch) {
+        OpportunityLineItemTriggerServices.allowODMUpdates = true;
+
+        if (isBatch) {
+            Database.SaveResult[] results = Database.update(oliItemList, false);
+            List<OpportunityLineItem> lsOLIforRetry = new List<OpportunityLineItem>();
+            List<String> failedOliIdsForPriceBatchTemp = new List<String>();
+
+            // Process initial update results and handle retries in one go
+            processSaveResults(results, oliItemList, lsOLIforRetry, failedOliIdsForPriceBatchTemp);
+
+            if (!lsOLIforRetry.isEmpty()) {
+                Database.SaveResult[] retryResults = Database.update(lsOLIforRetry, false);
+                processSaveResults(retryResults, oliItemList, lsOLIforRetry, failedOliIdsForPriceBatchTemp); // Handle retry logic
+            }
+
+            failedOliCount += failedOliIdsForPriceBatchTemp.size(); // DAASN-22243
+        } else {
+            update oliItemList;
+        }
+    }
+
+    // Refactored error handling logic for the save results with reduced for loops
+    @TestVisible
+    private static void processSaveResults(Database.SaveResult[] results, List<OpportunityLineItem> oliItemList, List<OpportunityLineItem> lsOLIforRetry, List<String> failedOliIdsForPriceBatchTemp) {
+        String message;
+        Integer i = 0;
+
+        // Single loop to handle errors, retries, and store failed records
+        for (Database.SaveResult result : results) {
+            if (!result.isSuccess()) {
+                message = 'Error in updating Opportunity Line Item - ' + oliItemList[i].Id + '\n' + 'Error Message : \n';
+                String errorType = '';
+                Boolean recordAdded = false;
+
+                // Iterate through errors and handle retry logic in the same loop
+                for (Database.Error err : result.getErrors()) {
+                    // If we detect row lock issue, add to retry list once
+                    if (err.getStatusCode() == StatusCode.UNABLE_TO_LOCK_ROW && !recordAdded) {
+                        lsOLIforRetry.add(oliItemList[i]); // Collect for retry
+                        recordAdded = true;
+                    } else {
+                        // Otherwise, add to failed list
+                        failedOliIdsForPriceBatchTemp.add(oliItemList[i].Id); // Store failed OLI records
+                    }
+
+                    // Append error details to the message
+                    message += err.getStatusCode() + ' : ' + err.getMessage().replaceAll(',', ' -') + '\n';
+                    errorType = '' + err.getStatusCode();
+                }
+
+                // After processing errors, handle the exception
+                handleException(oliItemList[i].Id, errorType, message, 'handleOpportunityLineItemDML');
+            }
+            i++;
+        }
+    }
+
+    /*
+     *  Description      : Transforms the null value to empty string such that API attribute error is handled
+     */
+    public static String handleNull(String param) {
+        if (param == null) {
+            param = '';
+        }
+        return param;
+    }
+
+    /*
+     *  Description      : Handles exception according to context(Synchronous/Asynchronous)
+     */
+    public static void handleException(Id oliId, String errorCode, String errorMessage, String methodName) {
+        if (batchContext != null && logBatchException) {
+            String className = callingType != '' ? callingType : 'SUBS_PopulatePriceOnOpptyBatch'; // DAASN-21944
+            DROM_RenewalOpportunityUtility.logBatchException(errorMessage, null, oliId, className, methodName, className, 'OpportunityLineItem', errorCode, null, batchContext);
+        }
+    }
+
+    public class ResponseWrapper {
+        @AuraEnabled
+        public Boolean success;
+        @AuraEnabled
+        public String errorMessage;
+        @AuraEnabled //CRMEAGLE-1582
+        public String partialSuccess; //CRMEAGLE-1582
+    }
+
+    /*
+     *   Descpription : DAASN-20750 : returns the query string to fetch the OLIs which are eligible for monthly price refresh
+     */
+    public static String getOLIsforPriceRefresh(Map<String, Set<String>> mOfferingIdTosImpactedCountries, String runRecordType) {
+        String queryFilter;
+        List<Batch_Job_Setting__mdt> bList = [SELECT Query_Filter__c FROM Batch_Job_Setting__mdt WHERE DeveloperName = 'Monthly_Price_Refresh'];
+        if (bList.size() > 0) {
+            queryFilter = bList[0].Query_Filter__c;
+        }
+        System.debug(runRecordType);
+        //Opportunity fields
+        String query = 'SELECT ' + SUBS_OpportunityPriceService.getOLIFieldsToQuery();
+        query += ' FROM OpportunityLineItem WHERE ';
+        if (queryFilter != null) {
+            query += queryFilter;
+        }
+        //Adding check to verify the opportunity is open
+        query += ' Opportunity.IsClosed = false ';
+        //Product record type should be offering for both subscription and sales oppty
+        query += 'AND Product2.RecordTypeName__c = \'Offering\' ';
+
+        //Adding check to verify the OLIs are not closed. Check if pending is required
+        //Add oppty record type condition and combine with OLI renewal status
+        if (runRecordType == 'SUBSCRIPTION') {
+            query += ' AND (Opportunity.RecordType.Name = \'Subscription Opportunity\' AND Renewal_Status__c IN (\'Open\', \'Pending\', null))';
+        } else if (runRecordType == 'SALES') {
+            query += ' AND (Opportunity.RecordType.Name = \'Autodesk Opportunity\' AND Renewal_Status__c IN (\'Open\', \'Pending\', null))';
+        } else {
+            query += ' AND ((Opportunity.RecordType.Name = \'Subscription Opportunity\' OR Opportunity.RecordType.Name = \'Autodesk Opportunity\') AND Renewal_Status__c IN (\'Open\', \'Pending\', null))';
+        }
+
+        query += ' AND (';
+        //Adding country and offering id check
+        Boolean notFirstRun = false;
+        //Iterate and put specific offering id and country combination
+        for (String offeringId : mOfferingIdTosImpactedCountries.keySet()) {
+            Boolean countryFirstRun = true;
+            String countryListStr = '(';
+            for (String country : mOfferingIdTosImpactedCountries.get(offeringId)) {
+                if (!countryFirstRun) {
+                    countryListStr += ',';
+                }
+                countryListStr += '\'' + country + '\'';
+                countryFirstRun = false;
+            }
+            countryListStr += ')';
+            if (notFirstRun) {
+                query += ' OR ';
+            }
+            query += ' (Product2.OfferingId__c = \'' + offeringId + '\' AND Opportunity_Country__c IN ' + countryListStr + ')';
+            notFirstRun = true;
+        }
+
+        query += ' ) AND (Renewal_Status__c IN :renewalTypes OR Renewal_Status__c = null) ORDER BY OpportunityId';
+        System.debug(query);
+        return query;
+    }
+
+    /*
+     *   Descpription : DAASN-21944 : returns the map of country code to country name
+     */
+    public static Map<String, String> fetchCountryCodeToName() {
+        Map<String, String> mCountryCodeToCountryName = new Map<String, String>();
+        //DAASN-25397 - Removed ODM_Flag__c = TRUE from query
+        for (Country__c country : [SELECT Id, Name, Country_Code__c, Default_Sales_Org__c FROM Country__c]) {
+            mCountryCodeToCountryName.put(country.Country_Code__c, country.Name);
+        }
+        return mCountryCodeToCountryName;
+    }
+
+    // DAASN-21963 - Calling from price batch to store the details of the processed Records in the batch and their failures for each execute.
+    public static void transactionRecDetailsOfPriceBatchEachExecute(Integer totalCount, Integer failedOliCnt) {
+        Integer successOliCountForPriceBatch = totalCount - failedOliCnt; // storing the success oli records
+        String errorMessage = 'Total OLI Records processed :- ' + totalCount + '\n' + 'Failure Count : ' + failedOliCnt + '\n' + 'Success Count : ' + successOliCountForPriceBatch;
+
+        String className = callingType != '' ? callingType : 'SUBS_PopulatePriceOnOpptyBatch'; //DAASN-21944
+        DROM_RenewalOpportunityUtility.logBatchException(errorMessage, null, null, className, 'transactionRecDetailsOfPriceBatchEachExecute', className, 'OpportunityLineItem', null, null, batchContext);
+    }
+
+    public static void updateAtrOnOli(Set<Id> oppId) {
+        List<OpportunityLineItem> oliList = new List<OpportunityLineItem>();
+
+        for (OpportunityLineItem oli : [SELECT OpportunityId, Asset_Serial_Number__c, Price_Error__c, Pricing_Method__c, Annual_Declared_Value__c, Line_Item_Action__c, Line_Item_ACV__c, Line_Item_ATR__c, Reference_Subscription__c, Contract_Line_Item__c, Gross_New_ACV__c, Downsell_ACV__c, Contract_Line_Item__r.Pelican_Subscription_Id__c, Reference_Subscription_Ids__c FROM OpportunityLineItem WHERE OpportunityId IN :oppId]) {
+            calculateAtrValues(oli, null);
+            oliList.add(oli);
+        }
+
+        if (System.isBatch()) {
+            MJA_OpportunityUtility.SKIP_OPPORTUNITY_TRIGGER = true;
+            MJA_OpportunityUtility.SKIP_OPPORTUNITYLINEITEM_TRIGGER = true;
+        }
+        handleOpportunityLineItemDML(oliList, System.isBatch());
+    }
+
+    public static OpportunityLineItem calculateAtrValues(OpportunityLineItem oli, Decimal defaultACV) {
+        oli.Line_Item_ATR__c = oli.Line_Item_ATR__c == null ? 0 : oli.Line_Item_ATR__c;
+        Double lineitemACV = defaultACV != null ? defaultACV : oli.Line_Item_ACV__c;
+        if (oli.Line_Item_Action__c == 'Renewal' || oli.Line_Item_Action__c == 'Extension' || oli.Line_Item_Action__c == 'New' || oli.Line_Item_Action__c == 'Co-term' || oli.Line_Item_Action__c == 'True-up' || oli.Line_Item_Action__c == 'Switch' || oli.Line_Item_Action__c == 'Mid-term switch' || oli.Line_Item_Action__c == 'Trade-in') {
+            oli.Gross_New_ACV__c = (lineitemACV - oli.Line_Item_ATR__c) > 0 ? (lineitemACV - oli.Line_Item_ATR__c) : 0;
+            oli.Downsell_ACV__c = (lineitemACV - oli.Line_Item_ATR__c) > 0 ? 0 : (lineitemACV - oli.Line_Item_ATR__c);
+        }
+        return oli;
+    }
+
+    @TestVisible
+    private static void handleOliUpdate(List<OpportunityLineItem> lsCatchedOLIRecord) {
+        Database.SaveResult[] results = Database.update(lsCatchedOLIRecord, false);
+        Integer j = 0;
+        for (Database.SaveResult result : results) {
+            String message = '';
+            String errorType = '';
+            if (!result.isSuccess()) {
+                message = 'Error in updating Opportunity Line Item - ' + lsCatchedOLIRecord[j].Id + '\n' + 'Error Message : \n';
+                //    Boolean recordAdded = false;
+                for (Database.Error err : result.getErrors()) {
+                    message += err.getStatusCode() + ' : ' + err.getMessage().replaceall(',', ' -') + '\n';
+                    errorType = '' + err.getStatusCode();
+                }
+                handleException(lsCatchedOLIRecord[j].Id, errorType, message, 'populatePriceOnOpportunityLineItems');
+            }
+            j++;
+        }
+    }
+}
