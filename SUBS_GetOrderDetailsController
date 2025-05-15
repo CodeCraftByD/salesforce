@@ -1,0 +1,119 @@
+public without sharing class SUBS_GetOrderDetailsController {
+    public static String accessToken = '';
+    public static Map<String, Transaction__c> opptyIdTransactionMap = new Map<String, Transaction__c>();
+    public static Map<String, TransactionEventTriggerHelperExtension.Order> opptyIdOrderMap = new Map<String, TransactionEventTriggerHelperExtension.Order>();
+    public static Transaction__c tx = new Transaction__c();
+    public static List<TransactionEventTriggerHelperExtension.Order> opptyIdOrder = new List<TransactionEventTriggerHelperExtension.Order>();
+    public static String orderDetailResp = '';
+    public static String authHeader;
+    public static Map<String, Credentials__c> credentialsMap = new Map<String, Credentials__c>();
+
+    public static void invokeGetOrderDetail(Transaction__c transObj) {
+        string transStr = JSON.serialize(transObj);
+        if (System.isBatch()) {
+            getOrderDetailViaBatch(transStr);
+        } else {
+            getOrderDetail(transStr);
+        }
+    }
+
+    @future(callout=true)
+    public static void getOrderDetail(String orderNumber) {
+        Transaction__c transObj = (Transaction__c) JSON.deserialize(orderNumber, Transaction__c.class);
+        authHeader = SUBS_GetOrderDetailsController.getAccessTokenForGetOrderDetailsAPI();
+        if (authHeader != null) {
+            orderDetailResp = sendHttpRequest(authHeader, 'GET', credentialsMap.get('GetOrderDetails').EndPoint_URL__c, transObj.Transaction_Order_Number__c);
+            opptyIdTransactionMap.put(transObj.Opportunity__c, transObj);
+            if (String.isNotBlank(orderDetailResp)) {
+                orderDetailResp = orderDetailResp.replace('currency', 'orderCurrency');
+                opptyIdOrderMap.put(transObj.Opportunity__c, (TransactionEventTriggerHelperExtension.Order) Json.deserialize(orderDetailResp, TransactionEventTriggerHelperExtension.Order.class));
+                TransactionEventTriggerHelperExtension.processOrderUpdates(opptyIdTransactionMap, opptyIdOrderMap, false);
+            } else {
+                if (opptyIdTransactionMap.size() > 0) {
+                    for (Transaction__c tx : opptyIdTransactionMap.values()) {
+                        if (opptyIdOrderMap.get(tx.Opportunity__c) != null) {
+                            tx.Log__c = Json.serializePretty(opptyIdOrderMap.get(tx.Opportunity__c));
+                        }
+                        tx.Status__c = 'Failed';
+                    }
+                    update opptyIdTransactionMap.values();
+                }
+            }
+        }
+    }
+
+    public static void getOrderDetailViaBatch(String orderNumber) {
+        Transaction__c transObj = (Transaction__c) JSON.deserialize(orderNumber, Transaction__c.class);
+        authHeader = SUBS_GetOrderDetailsController.getAccessTokenForGetOrderDetailsAPI();
+        if (authHeader != null) {
+            orderDetailResp = sendHttpRequest(authHeader, 'GET', credentialsMap.get('GetOrderDetails').EndPoint_URL__c, transObj.Transaction_Order_Number__c);
+            opptyIdTransactionMap.put(transObj.Opportunity__c, transObj);
+            if (String.isNotBlank(orderDetailResp)) {
+                orderDetailResp = orderDetailResp.replace('currency', 'orderCurrency');
+                opptyIdOrderMap.put(transObj.Opportunity__c, (TransactionEventTriggerHelperExtension.Order) Json.deserialize(orderDetailResp, TransactionEventTriggerHelperExtension.Order.class));
+                TransactionEventTriggerHelperExtension.processOrderUpdates(opptyIdTransactionMap, opptyIdOrderMap, false);
+            } else {
+                if (opptyIdTransactionMap.size() > 0) {
+                    for (Transaction__c tx : opptyIdTransactionMap.values()) {
+                        if (opptyIdOrderMap.get(tx.Opportunity__c) != null) {
+                            tx.Log__c = Json.serializePretty(opptyIdOrderMap.get(tx.Opportunity__c));
+                        }
+                        tx.Status__c = 'Failed';
+                    }
+                    update opptyIdTransactionMap.values();
+                }
+            }
+        }
+    }
+
+    public static string sendHttpRequest(String authorizationHeader, String method, String endpoint, String orderNumber) {
+        Http http = new Http();
+        HttpRequest request = new HttpRequest();
+        request.setMethod(method);
+        request.setHeader('Authorization', authorizationHeader);
+        endpoint = endpoint + orderNumber;
+        request.setEndpoint(endpoint);
+        HttpResponse response = new HttpResponse();
+        String orderResponse;
+        System.debug('request Body:' + request);
+        try {
+            response = http.send(request);
+            if (response.getStatusCode() == 200) {
+                orderResponse = response.getBody();
+            }
+            System.debug('Response Body: ' + response.getBody());
+        } catch (Exception e) {
+            system.debug(e.getMessage());
+        }
+        return orderResponse;
+    }
+
+    //CRMEAGLE-2043
+    public static string getAccessTokenForGetOrderDetailsAPI() {
+        ADSK_CredentialUtility authToken = new ADSK_CredentialUtility();
+        accessToken = authToken.getAccessToken('GetOrderDetails');
+        Credentials__c credObj = [SELECT Name, EndPoint_URL__c FROM Credentials__c WHERE Name = 'GetOrderDetails' LIMIT 1];
+        if (credObj != null) {
+            credentialsMap.put(credObj.Name, credObj);
+        }
+        string authHeader;
+        if (accessToken != null) {
+            authHeader = 'bearer' + ' ' + accessToken;
+        }
+        return authHeader;
+    }
+
+    //CRMEAGLE-2043
+    public static List<TransactionEventTriggerHelperExtension.Order> getOrderDetailViaAtrBatch(String orderNumber) {
+        authHeader = SUBS_GetOrderDetailsController.getAccessTokenForGetOrderDetailsAPI();
+        if (authHeader != null) {
+            orderDetailResp = sendHttpRequest(authHeader, 'GET', credentialsMap.get('GetOrderDetails').EndPoint_URL__c, orderNumber);
+            system.debug('Response = ' + orderDetailResp);
+            if (String.isNotBlank(orderDetailResp)) {
+                orderDetailResp = orderDetailResp.replace('currency', 'orderCurrency');
+                opptyIdOrder.add((TransactionEventTriggerHelperExtension.Order) Json.deserialize(orderDetailResp, TransactionEventTriggerHelperExtension.Order.class));
+            }
+        }
+        return opptyIdOrder;
+    }
+}
