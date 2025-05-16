@@ -1,0 +1,277 @@
+/**
+ * @description Controller for CRIIS Program Enrollment functionality
+ * @author OptimizedCode
+ */
+public with sharing class CRIISProgramEnrollmentController {
+    private static final String BEVERAGE_MANUFACTURER = 'Beverage Manufacturer';
+    private static final String BEVERAGE_DISTRIBUTOR = 'Beverage Distributor';
+    private static final String STATUS_1_2 = 'Status 1: company is required to report & pay;Status 2: company has chosen to pay for someone else';
+    private static final String STATUS_3_4 = 'Status 3: company has someone else paying for them;Status 4: beverage manufacturer, bottles or imports in Aluminum only';
+    
+    /**
+     * @description Retrieves filtered program enrollments based on specified criteria
+     * @param programType Type of program (bm, ds, or all)
+     * @param includeStatus12 Whether to include status 1 and 2
+     * @param includeStatus34 Whether to include status 3 and 4
+     * @return List of filtered program enrollments
+     */
+    @AuraEnabled(cacheable=true)
+    public static List<CRIIS_Program_Enrollment__c> getFilteredEnrollments(
+        String programType, 
+        Boolean includeStatus12, 
+        Boolean includeStatus34,
+        Boolean includeNonResponsive
+    ) {
+        try {
+            if (!Schema.SObjectType.CRIIS_Program_Enrollment__c.isAccessible() ||
+                !Schema.SObjectType.CRIIS_Program_Enrollment__c.fields.Name.isAccessible() ||
+                !Schema.SObjectType.CRIIS_Program_Enrollment__c.fields.CRIIS_Program_Type__c.isAccessible() ||
+                !Schema.SObjectType.CRIIS_Program_Enrollment__c.fields.CRIIS_Primary_Account_Status__c.isAccessible() ||
+                !Schema.SObjectType.CRIIS_Program_Enrollment__c.fields.CRIIS_Entity_Name__c.isAccessible() ||
+                !Schema.SObjectType.CRIIS_Program_Enrollment__c.fields.CRIIS_Entity_Lookup__c.isAccessible()) {
+                throw new SecurityException('Insufficient access permissions to CRIIS Program Enrollment records.');
+            }
+            
+            String query = 'SELECT Id, Name, CRIIS_Program_Type__c, CRIIS_Primary_Account_Status__c, CRIIS_Entity_Name__c,CRIIS_Entity_Lookup__r.Name ' +
+            'FROM CRIIS_Program_Enrollment__c WHERE ';
+        
+        if (programType == 'bm') {
+            query += 'CRIIS_Program_Type__c = \'Beverage Manufacturer\' ';
+        } else if (programType == 'ds') {
+            query += 'CRIIS_Program_Type__c = \'Beverage Distributor\' ';
+        } else {
+            query += '(CRIIS_Program_Type__c = \'Beverage Manufacturer\' OR CRIIS_Program_Type__c = \'Beverage Distributor\') ';
+        }
+        if (includeStatus12 || includeStatus34) {
+            query += 'AND (';
+            
+            if (includeStatus12) {
+                query += 'CRIIS_Primary_Account_Status__c IN (\'Status 1: company is required to report & pay\', \'Status 2: company has chosen to pay for someone else\')';
+                
+                if (includeStatus34) {
+                    query += ' OR ';
+                }
+            }
+            
+            if (includeStatus34) {
+                query += 'CRIIS_Primary_Account_Status__c IN (\'Status 3: company has someone else paying for them\', \'Status 4: beverage manufacturer, bottles or imports in Aluminum only\')';
+            }
+            
+            query += ') ';
+        }
+
+        query += 'AND CRIIS_Entity_Lookup__c IN (SELECT CRIIS_Contact__c FROM CRIIS_Applicant__c) ';
+        query += 'AND CRIIS_Entity_Lookup__c IN (SELECT CRIIS_Account__c FROM Address WHERE CRIIS_Account__c != null';
+
+        if(!includeNonResponsive){
+           query += ' AND CRIIS_Flag__c = false'; 
+        }
+
+        query += ') ORDER BY Name LIMIT 1000';
+        
+        return Database.query(query);
+            
+        } catch (SecurityException se) {
+            throw new AuraHandledException(se.getMessage());
+        } catch (Exception e) {
+            throw new AuraHandledException('Error retrieving program enrollments: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * @description Generates a PDF report for program enrollments
+     * @param programType Type of program
+     * @param includeStatus12 Whether to include status 1 and 2
+     * @param includeStatus34 Whether to include status 3 and 4
+     * @param includeShowType Whether to show secondary contact type
+     * @param selectedIds List of selected enrollment IDs
+     * @return Base64-encoded PDF blob
+     */
+    @AuraEnabled
+    public static String generatePDF(
+        String programType, 
+        Boolean includeStatus12, 
+        Boolean includeStatus34, 
+        Boolean includeShowType,
+        Boolean includeShownonResponsive, 
+        List<Id> selectedIds
+    ) {
+        try {
+            if (programType == null) {
+                programType = '';
+            }
+            
+            Boolean showType = includeShowType != null ? includeShowType : false;
+            Boolean status12 = includeStatus12 != null ? includeStatus12 : false;
+            Boolean status34 = includeStatus34 != null ? includeStatus34 : false;
+            Boolean shownonResponsive = includeShownonResponsive != null ? includeShownonResponsive : false;
+            
+            Map<String, String> pageParams = new Map<String, String>{
+                'programType' => programType,
+                'includeStatus12' => String.valueOf(status12),
+                'includeStatus34' => String.valueOf(status34),
+                'includeShowType' => String.valueOf(showType),
+                'includeNonResponsive' => String.valueOf(shownonResponsive)
+            };
+            
+            PageReference pdfPage = Page.CRIISProgramEnrollmentPDF;
+            
+            for (String key : pageParams.keySet()) {
+                pdfPage.getParameters().put(key, pageParams.get(key));
+            }
+            
+            Blob pdfBlob;
+            
+            if (Test.isRunningTest()) {
+                pdfBlob = Blob.valueOf('Test PDF Content');
+            } else {
+                pdfBlob = pdfPage.getContentAsPDF();
+            }
+            
+            return EncodingUtil.base64Encode(pdfBlob);
+            
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error generating PDF: ' + e.getMessage() + ' Stack: ' + e.getStackTraceString());
+            throw new AuraHandledException('Error generating PDF: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * @description Gets entities (accounts) without address records
+     * @return List of accounts without address records
+     */
+    
+    @AuraEnabled(cacheable=true)
+    public static List<Account> getEntitiesWithoutAddress(String programType, 
+                                                           Boolean includeStatus12, 
+                                                           Boolean includeStatus34) {
+        try {
+            validateFieldAccess();
+            
+            Set<Id> entityIdsFromEnrollments = getEntityIdsFromProgramEnrollments(programType, includeStatus12, includeStatus34);
+            
+            if (entityIdsFromEnrollments.isEmpty()) {
+                System.debug('No entities found in program enrollments matching criteria');
+                return new List<Account>();
+            }
+            
+            return getAccountsWithoutAddressesFromEntityIds(entityIdsFromEnrollments);
+            
+        } catch (SecurityException se) {
+            System.debug(LoggingLevel.ERROR, 'Security exception: ' + se.getMessage());
+            throw new AuraHandledException(se.getMessage());
+        } catch (Exception e) {
+            System.debug(LoggingLevel.ERROR, 'Error: ' + e.getMessage() + '\n' + e.getStackTraceString());
+            throw new AuraHandledException('Error retrieving entities without address: ' + e.getMessage());
+        }
+    }
+    
+    /**
+     * @description Validates that the current user has access to required Account fields
+     * @throws SecurityException if access is insufficient
+     */
+    private static void validateFieldAccess() {
+        if (!Schema.SObjectType.Account.isAccessible() ||
+            !Schema.SObjectType.Account.fields.Name.isAccessible() ||
+            !Schema.SObjectType.Account.fields.Account_Id__c.isAccessible() ||
+            !Schema.SObjectType.Account.fields.Account_type__c.isAccessible()) {
+            throw new SecurityException('Insufficient access permissions to Account records.');
+        }
+    }
+    
+    /**
+     * @description Gets entity IDs from program enrollments based on filters
+     * @param programType The type of program
+     * @param includeStatus12 Whether to include accounts with status 1 or 2
+     * @param includeStatus34 Whether to include accounts with status 3 or 4
+     * @return Set<Id> Set of entity IDs from program enrollments
+     */
+    private static Set<Id> getEntityIdsFromProgramEnrollments(String programType, 
+                                                             Boolean includeStatus12, 
+                                                             Boolean includeStatus34) {
+        String query = 'SELECT Id, Name, CRIIS_Entity_Lookup__c ' +
+                      'FROM CRIIS_Program_Enrollment__c WHERE ';
+        
+        if (programType == 'bm') {
+            query += 'CRIIS_Program_Type__c = \'Beverage Manufacturer\' ';
+        } else if (programType == 'ds') {
+            query += 'CRIIS_Program_Type__c = \'Beverage Distributor\' ';
+        } else {
+            query += '(CRIIS_Program_Type__c = \'Beverage Manufacturer\' OR CRIIS_Program_Type__c = \'Beverage Distributor\') ';
+        }
+        
+        if (includeStatus12 || includeStatus34) {
+            query += 'AND (';
+            
+            if (includeStatus12) {
+                query += 'CRIIS_Primary_Account_Status__c IN (\'Status 1: company is required to report & pay\', \'Status 2: company has chosen to pay for someone else\')';
+                
+                if (includeStatus34) {
+                    query += ' OR ';
+                }
+            }
+            
+            if (includeStatus34) {
+                query += 'CRIIS_Primary_Account_Status__c IN (\'Status 3: company has someone else paying for them\', \'Status 4: beverage manufacturer, bottles or imports in Aluminum only\')';
+            }
+            
+            query += ') ';
+        }
+        
+        query += 'AND CRIIS_Entity_Lookup__c != null ORDER BY Name LIMIT 50000';
+        
+        List<CRIIS_Program_Enrollment__c> programList = Database.query(query);
+        System.debug('Found ' + programList.size() + ' program enrollments matching criteria');
+        
+        Set<Id> entityIdSet = new Set<Id>();
+        for (CRIIS_Program_Enrollment__c pe : programList) {
+            if (pe.CRIIS_Entity_Lookup__c != null) {
+                entityIdSet.add(pe.CRIIS_Entity_Lookup__c);
+            }
+        }
+        
+        System.debug('Found ' + entityIdSet.size() + ' unique entity IDs');
+        return entityIdSet;
+    }
+    
+    /**
+     * @description Gets accounts that don't have addresses from a set of entity IDs
+     * @param entityIds Set of entity IDs to check
+     * @return List<Account> List of accounts without addresses
+     */
+    private static List<Account> getAccountsWithoutAddressesFromEntityIds(Set<Id> entityIds) {
+        if (entityIds.isEmpty()) {
+            return new List<Account>();
+        }
+        
+       Set<Id> accountsWithAddresses = new Set<Id>();
+        for (Schema.Address addr : [SELECT CRIIS_Account__c FROM Address 
+                                     WHERE CRIIS_Account__c IN :entityIds 
+                                     WITH SECURITY_ENFORCED LIMIT 1000]) {
+            if (addr.CRIIS_Account__c != null) {
+                accountsWithAddresses.add(addr.CRIIS_Account__c);
+            }
+        }
+
+        
+        System.debug('Found ' + accountsWithAddresses.size() + ' accounts with addresses');
+        
+        List<Account> accountsWithoutAddresses = [
+            SELECT Id, Name, Account_Id__c, Account_type__c
+            FROM Account
+            WHERE Id IN :entityIds
+            AND Id NOT IN :accountsWithAddresses
+            WITH SECURITY_ENFORCED
+            ORDER BY Name ASC
+            LIMIT 1000
+        ];
+        
+        System.debug('Found ' + accountsWithoutAddresses.size() + ' accounts without addresses');
+        return accountsWithoutAddresses;
+    }
+    
+    /**
+     * @description Custom exception class for security-related exceptions
+     */
+    private class SecurityException extends Exception {}
+}
