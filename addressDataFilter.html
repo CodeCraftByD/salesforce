@@ -1,0 +1,143 @@
+<template>
+    <lightning-card title="CRIIS Program Enrollment Data" icon-name="standard:account">
+        <div class="slds-p-around_medium">
+            <!-- Filter Section -->
+            <div class="slds-grid slds-gutters slds-wrap">
+                <!-- Program Type Filter -->
+                <div class="slds-col slds-size_1-of-3 slds-p-bottom_small">
+                    <label class="slds-form-element__label">Program Type</label>
+                    <div class="slds-form-element__control">
+                        <lightning-radio-group name="programTypeOptions" options={programTypeOptions}
+                            value={programTypeFilter} onchange={handleProgramTypeChange} type="button">
+                        </lightning-radio-group>
+                    </div>
+                </div>
+
+                <!-- Status Filters -->
+                <div class="slds-col slds-size_1-of-3 slds-p-bottom_small">
+                    <label class="slds-form-element__label">&nbsp;</label>
+                    <div class="slds-form-element__control">
+                        <lightning-input type="checkbox" label="All Status 1's & 2's" checked={showStatus12}
+                            onchange={handleStatus12Change}>
+                        </lightning-input>
+                    </div>
+                </div>
+
+                <div class="slds-col slds-size_1-of-3 slds-p-bottom_small">
+                    <label class="slds-form-element__label">&nbsp;</label>
+                    <div class="slds-form-element__control">
+                        <lightning-input type="checkbox" label="All Status 3's & 4's" checked={showStatus34}
+                            onchange={handleStatus34Change}>
+                        </lightning-input>
+                    </div>
+                </div>
+
+                <div class="slds-col slds-size_1-of-3 slds-p-bottom_small">
+                    <label class="slds-form-element__label">&nbsp;</label>
+                    <div class="slds-form-element__control">
+                        <lightning-input type="checkbox" label="Include Secondary Contact" checked={showType}
+                            onchange={handleTypeChange}>
+                        </lightning-input>
+                    </div>
+                </div>
+                <div class="slds-col slds-size_1-of-1 slds-p-bottom_small">
+                    <label class="slds-form-element__label">&nbsp;</label>
+                    <div class="slds-form-element__control">
+                        <lightning-input type="checkbox" label="Include Report of Recipients Missing Address" checked={showmissingAddress}
+                            onchange={handleMissingAddressChange}>
+                        </lightning-input>
+                    </div>
+                </div>
+                <div class="slds-col slds-size_1-of-1 slds-p-bottom_small">
+                    <label class="slds-form-element__label">&nbsp;</label>
+                    <div class="slds-form-element__control">
+                        <lightning-input type="checkbox" label="Include Addresses Marked as Non-Responsive" checked={shownonResponsive}
+                            onchange={handleNonResponsiveChange}>
+                        </lightning-input>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="slds-grid slds-gutters slds-p-vertical_medium">
+                <div class="slds-col slds-size_1-of-1">
+                    <lightning-button label="Generate Data" onclick={handleGenerateData} variant="brand"
+                        class="slds-m-right_x-small">
+                    </lightning-button>
+                    <lightning-button label="Generate PDF" onclick={handleGeneratePDF} variant="brand"
+                        class="slds-m-right_x-small">
+                    </lightning-button>
+                   <!-- <lightning-button label="Reset Filters" onclick={handleResetFilters} variant="neutral"
+                        class="slds-float_right">
+                    </lightning-button>-->
+                </div>
+            </div>
+
+            <!-- Loading Spinner -->
+            <div if:true={isLoading} class="slds-is-relative slds-m-around_medium">
+                <lightning-spinner alternative-text="Loading" size="medium"></lightning-spinner>
+            </div>
+
+            <template lwc:if={isEmptyData}>
+                <div if:true={isEmptyData} class="slds-align_absolute-center slds-p-around_medium slds-text-color_weak">
+                    No records to display. Use the filters above and click "Generate Data" to see results.
+                </div>
+            </template>
+            <template lwc:else>
+
+                <lightning-datatable key-field="Id" data={recordsToDisplay} columns={columns} hide-checkbox-column
+                    onrowselection={handleRowSelection} class="slds-m-bottom_medium"></lightning-datatable>
+
+                <!-- Pagination Controls -->
+                <div class="slds-grid slds-grid_align-spread">
+                    <div>
+                        <lightning-button label="Previous" icon-name="utility:chevronleft" onclick={previousPage}
+                            disabled={disablePrevious}></lightning-button>
+                    </div>
+                    <div class="slds-align_absolute-center">
+                        {paginationInfo}
+                    </div>
+                    <div>
+                        <lightning-button label="Next" icon-name="utility:chevronright" icon-position="right"
+                            onclick={nextPage} disabled={disableNext}></lightning-button>
+                    </div>
+                </div>
+
+                <!-- Records Per Page Selector -->
+                <div class="slds-m-top_medium">
+                    <lightning-combobox label="Records Per Page" value={recordsPerPage} options={pageOptions}
+                        onchange={handleRecordsPerPageChange}></lightning-combobox>
+                </div>
+
+            </template>
+        </div>
+        <!-- Recipient Missing Address Report Section -->
+<template if:true={showMisAddress}>
+    <div class="slds-box slds-theme_default slds-m-top_large">
+        <p class="slds-text-heading_small slds-m-bottom_medium"><strong>Entity Missing Address</strong></p>
+        <!-- Table -->
+        <template lwc:if={isEmptyData2}>
+                <div if:true={isEmptyData2} class="slds-align_absolute-center slds-p-around_medium slds-text-color_weak">
+                    No records to display. click "Generate Data" to see results.
+                </div>
+            </template>
+            <template lwc:else>
+<lightning-datatable
+            key-field="id"
+            data={missingRecordsToDisplay}
+            columns={missingAddressColumns}
+            hide-checkbox-column
+            class="slds-m-top_small">
+        </lightning-datatable>
+        <div class="slds-grid slds-grid_align-spread slds-m-top_small">
+    <lightning-button label="Previous" onclick={handleMissingPreviousPage} disabled={disableMissingPrevious}></lightning-button>
+    <div class="slds-align_absolute-center">{missingPaginationInfo}</div>
+    <lightning-button label="Next" onclick={handleMissingNextPage} disabled={disableMissingNext}></lightning-button>
+</div>
+            </template>
+        
+    </div>
+    
+</template>
+    </lightning-card>
+</template>
