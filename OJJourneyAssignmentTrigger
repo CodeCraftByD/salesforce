@@ -1,0 +1,43 @@
+trigger OJJourneyAssignmentTrigger on OJJourneyAssignment__c (before insert, before update, before delete, after insert, after update) {
+    if (Trigger.isBefore) {
+    
+        if (Trigger.isInsert || Trigger.isUpdate) {
+            OJJourneyAssignmentTriggerHandler.checkForJourneyAssigmentRT(Trigger.new);
+            OJJourneyAssignmentTriggerHandler.validateEmployeeNumberPrefix(Trigger.new);
+            OJJourneyAssignmentTriggerHandler.singleAssignmentForEmployeeNumber(Trigger.new);
+            
+            if(Trigger.isInsert){
+                OJJourneyAssignmentTriggerHandler.assignUsersToJourneyAssignments(Trigger.new);
+            }
+        } 
+        else if (Trigger.isDelete) {
+            OJJourneyAssignmentTriggerHandler.deleteAssociatedChecklistAssignments(Trigger.old);
+            OJJourneyAssignmentTriggerHandler.deleteAssociatedUserTasks(Trigger.old);
+        }
+
+    } else if (Trigger.isAfter) {
+        //Only update if journey assignments's start date is greater than today's date
+        if(Trigger.isUpdate){
+            Map<String, OJJourneyAssignment__c> journeyAssignments = OJJourneyAssignmentTriggerHandler.checkBoomerangOJJAs(Trigger.newMap, Trigger.oldMap);
+            OJJourneyAssignmentTriggerHandler.getRecordsWhoseStartDateAreGreaterThanToday(Trigger.new, journeyAssignments);
+            OJJourneyAssignmentTriggerHandler.deleteAssociatedChecklistAssignments(journeyAssignments.Values());
+            OJJourneyAssignmentTriggerHandler.upsertChecklistAssignment(journeyAssignments.Values());
+        }
+        //else if (Trigger.isInsert){
+            // don't assign checklists or send emails for records that are inserted with EndDate populated
+            // this can happen from the workday integration on a termination event
+            // the first time we see that employee in workday is when they are being terminated
+            //List<OJJourneyAssignment__c> journeyAssignments = OJJourneyAssignmentTriggerHandler.getRecordsForNonTerminatedEmployees(Trigger.new);
+
+            // don't assign checklist or send email for records that are inserted with a start date way in
+            // the past.  This can happen from the workday integration, because we have removed the filter 
+            // where they would only send data within 5 days of their start date (on Aug 6th, 2020)
+            // so now any workday events trigger their data to be sent. Between Aug 6th and Aug 10th, 2020
+            // we say ~5300 long tenured employees show up in OJ for the first time.
+            //journeyAssignments = OJJourneyAssignmentTriggerHandler.filterOutLongTenuredEmployees(journeyAssignments);
+
+            // now go ahead and assign the checklists
+            //OJJourneyAssignmentTriggerHandler.upsertChecklistAssignment(journeyAssignments);
+        //}
+    }
+}
