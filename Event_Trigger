@@ -1,0 +1,11 @@
+trigger Event_Trigger on Event (after insert, after update) {
+  Event_Trigger_Handler handler = new Event_Trigger_Handler();
+    
+    if (Trigger.isAfter) {
+        if (Trigger.isInsert) {
+            handler.handleAfterInsert(Trigger.new);
+        } else if (Trigger.isUpdate) {
+            handler.handleAfterUpdate(Trigger.new, Trigger.oldMap);
+        }
+    }
+}
