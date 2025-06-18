@@ -1,586 +1,481 @@
-public with sharing class MainMentoringController {
-    // Retrieve current user's mentors based on mentoring match status
-    @AuraEnabled
-    public static List<Mentoring_Match__c> retrieveMentorsFromOrg(String status){
-        List<Mentoring_Match__c> mentoringMatches = [SELECT 
-                                                     Id, 
-                                                     Name, 
-                                                     Mentor__c, 
-                                                     Request_Message__c,
-                                                     Response_Message__c,
-                                                     Mentor__r.Name, 
-                                                     Mentor__r.Id, 
-                                                     Mentor__r.AboutMe, 
-                                                     Mentor__r.City, 
-                                                     Mentor__r.Email, 
-                                                     Mentor__r.MediumPhotoUrl, 
-                                                     Mentor__r.Title,
-                                                     Mentor__r.Hire_Date__c, 
-                                                     Mentor__r.Equality_Group_Member__c,
-                                                     Mentee__c,
-                                                     Mentee__r.Name, 
-                                                     Status__c,
-                                                     Score__c
-                                                     FROM Mentoring_Match__c WHERE Mentee__c =: UserInfo.getUserId() AND Status__c =: status WITH SECURITY_ENFORCED]; 
-        return mentoringMatches;   
+import { LightningElement, track, api, wire } from "lwc";
+import { refreshApex } from "@salesforce/apex";
+import retrieveMentors from "@salesforce/apex/MainMentoringController.retrieveMentors";
+import { NavigationMixin } from "lightning/navigation";
+import FUNCTIONAL_COMPETENCIES_FIELD from "@salesforce/schema/User.Functional_Competencies__c";
+import GREAT_COMPETENCIES_FIELD from "@salesforce/schema/User.Great_Competencies__c";
+import BUSINESS_UNIT_FIELD from "@salesforce/schema/User.Business_Unit__c";
+import COST_CENTER_FIELD from "@salesforce/schema/User.Cost_Center__c";
+import MENTEE_TYPE_FIELD from "@salesforce/schema/User.Mentee_Type_Preference__c";
+import MENTOR_LOCATION_FIELD from "@salesforce/schema/User.Mentor_Location_Preference__c";
+import EGC_FIELD from "@salesforce/schema/User.Equality_Group_Member__c";
+import EXPERIENCES_FIELD from "@salesforce/schema/User.Experiences__c";
+import LANGUAGES_FIELD from "@salesforce/schema/User.Mentoring_Language__c";
+import CERTIFICATIONS_FIELD from "@salesforce/schema/User.Certifications__c";
+import AdvancedFiltersLabel from "@salesforce/label/c.search_advanced_filters";
+import areYouAFTELabel from "@salesforce/label/c.search_are_you_a_FTE";
+import searchMentorsLabel from "@salesforce/label/c.search_mentors";
+import couldntFindMentorsCriteriaLabel from "@salesforce/label/c.search_Oops_We_couldn_t_find_any_mentors_for_your_specified_criteria";
+import mentormenteerelationshipCriteriaLabel from "@salesforce/label/c.search_is_already_in_a_mentor_mentee_relationship_with_you";
+import capacityCriteriaLabel from "@salesforce/label/c.search_doesn_t_have_capacity_to_have_new_mentees";
+import mentorSuggestionsForYouLabel from "@salesforce/label/c.search_mentor_suggestions_for_you";
+import noAvailableMentorsForYouLabel from "@salesforce/label/c.search_There_are_no_available_mentors_for_your_specified_criteria";
+import weShortlistedGreatMentorsForYouLabel from "@salesforce/label/c.search_we_shortlisted_great_mentors_for_you";
+import filterCardTitle from "@salesforce/label/c.search_Filter_card_title";
+import searchBasedOnYourBackgroundLabel from "@salesforce/label/c.search_Based_on_your_background";
+import filterMentorsInsufficientModal from 'c/filterMentorsInsufficientModal';
+export default class SearchMentors extends NavigationMixin(LightningElement) {
+  @api showFilteringOptions = false;
+  @api filtersAlwaysOn = false;
+  @api showSearchBar = false;
+
+  @track mentorsRaw;
+  @track filteredMentors;
+  @track filterErrorMessage = '';
+  @track showFilters = false;
+  @track filterCategories;
+  @track loading = false;
+  @api showUnsupportedBanner = false;
+  @api searchTerm = '';
+  @track currentUser;
+
+  @track certifications = [];
+  @track typeOfMentoring = [];
+  @track functionalCompetencies = [];
+  @track languages = [];
+  @track experiences = [];
+  @track egcs = [];
+  @track greatCompetencies = [];
+  @track locations = [];
+  wiredMentors;
+  isSearchTermChange = false;
+  @api mentorData;
+  mentormenteerelationshipCriteria = mentormenteerelationshipCriteriaLabel;
+  capacityCriteria = capacityCriteriaLabel;
+  couldntFindMentorsCriteria = couldntFindMentorsCriteriaLabel;
+
+  labels = {
+    AdvancedFiltersLabel,
+    areYouAFTELabel,
+    searchMentorsLabel,
+    couldntFindMentorsCriteriaLabel,
+    mentormenteerelationshipCriteriaLabel,
+    capacityCriteriaLabel,
+    mentorSuggestionsForYouLabel,
+    noAvailableMentorsForYouLabel,
+    weShortlistedGreatMentorsForYouLabel,
+    searchBasedOnYourBackgroundLabel,
+    filterCardTitle,
+  };
+
+
+
+  connectedCallback() {
+    this.handleRetrieveFromCache();
+    if (this.filtersAlwaysOn) {
+      this.showFilters = true;
     }
-    
-    @AuraEnabled
-    public static List<Mentoring_Match__c> retrieveBookmarksFromOrg(String status){
-        List<Mentoring_Match__c> mentoringMatches = [SELECT 
-                                                     Id, 
-                                                     Name, 
-                                                     Mentor__c, 
-                                                     Request_Message__c,
-                                                     Response_Message__c,
-                                                     Mentor__r.Name, 
-                                                     Mentor__r.Id, 
-                                                     Mentor__r.AboutMe, 
-                                                     Mentor__r.City, 
-                                                     Mentor__r.Email, 
-                                                     Mentor__r.MediumPhotoUrl, 
-                                                     Mentor__r.Title,
-                                                     Mentor__r.Hire_Date__c, 
-                                                     Mentor__r.Equality_Group_Member__c,
-                                                     Mentee__c,
-                                                     Mentee__r.Name, 
-                                                     Status__c,
-                                                     Score__c
-                                                     FROM Mentoring_Match__c WHERE Mentee__c =: UserInfo.getUserId() AND  Status__c =: status WITH SECURITY_ENFORCED]; 
-        return mentoringMatches;   
+    this.loading = true;
+    this.handleRetrieveMentors();
+  }
+
+  bookmarkdmentorHandler(event) {
+    const mentors = this.filteredMentors.map((ele) => {
+      if (ele.Id === event.detail.user.Id) {
+        ele.isBookmarked = event.detail.bookmark;
+      }
+    });
+  }
+
+  handleRetrieveFromCache() {
+
+    if (localStorage.getItem('activeFilters')) {
+      try {
+        this.filterCategories = JSON.parse(localStorage.getItem('activeFilters'));
+
+        const certificationsList = [];
+        const typeOfMentoringList = [];
+        const functionalCompetenciesList = [];
+        const languagesList = [];
+        const experiencesList = [];
+        const egcsList = [];
+        const greatCompetenciesList = [];
+        const locationsList = [];
+
+        this.filterCategories.forEach((filter) => {
+          if (filter.filterField === CERTIFICATIONS_FIELD.fieldApiName) {
+            certificationsList.push(filter.id);
+          }
+          if (filter.filterField === MENTEE_TYPE_FIELD.fieldApiName) {
+            typeOfMentoringList.push(filter.id);
+          }
+          if (filter.filterField === FUNCTIONAL_COMPETENCIES_FIELD.fieldApiName) {
+            functionalCompetenciesList.push(filter.id);
+          }
+          if (filter.filterField === LANGUAGES_FIELD.fieldApiName) {
+            languagesList.push(filter.id);
+          }
+          if (filter.filterField === EXPERIENCES_FIELD.fieldApiName) {
+            experiencesList.push(filter.id);
+          }
+          if (filter.filterField === EGC_FIELD.fieldApiName) {
+            egcsList.push(filter.id);
+          }
+          if (filter.filterField === GREAT_COMPETENCIES_FIELD.fieldApiName) {
+            greatCompetenciesList.push(filter.id);
+          }
+          if (filter.fieldApiName === MENTOR_LOCATION_FIELD.fieldApiName) {
+            locationsList.push(filter.id);
+          }
+        });
+        this.certifications = certificationsList;
+        this.typeOfMentoring = typeOfMentoringList;
+        this.functionalCompetencies = functionalCompetenciesList;
+        this.languages = languagesList;
+        this.experiences = experiencesList;
+        this.egcs = egcsList;
+        this.greatCompetencies = greatCompetenciesList;
+        this.locations = locationsList;
+      }
+      catch (e) {
+        console.log('Failed to Parse');
+      }
     }
-    
-    // Creates new mentor match
-    @AuraEnabled
-    public static Mentoring_Match__c createBookmarkMentoringMatch(Id mentorId, Id menteeId, String status, String requestMessage, String responseMessage, Integer score, String removalReason, String removalInformation, String interestReason, String interestInformation){
-        // Throw error if both menteeId and mentorId aren't provided
-        if (mentorId == null && menteeId == null) {
-            throw new AuraHandledException('Oops! Something went wrong: Please provide at least a menteeId or a mentorId');
+  }
+
+  loadData() {
+    //Called when a request is sent in order to refresh the apex to filter out that person
+    refreshApex(this.wiredMentors);
+  }
+
+  hasBookmarkedMatch(matches) {
+    for (let i in matches) {
+      if (matches[i].Status__c == 'Bookmarked') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  handleRetrieveMentors() {
+    if (this.filterCategories) {
+      localStorage.setItem("activeFilters", JSON.stringify([...this.filterCategories]));
+    }
+
+    retrieveMentors({
+      certifications: this.certifications,
+      typeOfMentoring: this.typeOfMentoring,
+      functionalCompetencies: this.functionalCompetencies,
+      languages: this.languages,
+      experiences: this.experiences,
+      egcs: this.egcs,
+      greatCompetencies: this.greatCompetencies,
+      locations: this.locations,
+      searchTerm: this.searchTerm
+    })
+      .then(response => {
+        console.log("mentor data: ", response);
+        if (response.filteredMentors && !response.mentors.length > 0) {
+          this.processFilteredMentors(response.filteredMentors, this.searchTerm);
+          this.filteredMentors = [];
+        } else {
+          const scoredUsers = response.mentors.map((user) => {
+            return {
+              ...user,
+              topMentor: false,
+              topCareerMentor: false,
+              topValueMentor: false,
+              salesLeader: false,
+              isBookmarked: user.Mentoring_Matches__r && user.Mentoring_Matches__r.length > 0 && this.hasBookmarkedMatch(user.Mentoring_Matches__r)
+            };
+          });
+          console.log("scoredUsers: ", scoredUsers);
+          this.mentorsRaw = scoredUsers;
+          this.processMentors(scoredUsers);
         }
-        
-        // Either mentorId or menteeId should be the current user
-        // if (mentorId == null) {
-        //     mentorId = UserInfo.getUserId();
-        // }
-        if (menteeId == null) {
-            menteeId = UserInfo.getUserId();
+
+      })
+      .catch(error => {
+        this.error = error;
+        console.log("Error: ", error);
+        this.loading = false;
+        this.showUnsupportedBanner = true;
+      });
+  }
+
+  processFilteredMentors(filteredMent, searchTerm) {//change start
+    const normalizedSearchTerm = searchTerm.toLowerCase().trim();
+    console.log("normalizedSearchTerm: ", normalizedSearchTerm);
+    console.log("filteredMent: ", filteredMent);
+
+    const exactNameMatches = filteredMent.filter(mentor =>
+      mentor.Name && mentor.Name.toLowerCase() === normalizedSearchTerm
+    );
+
+    console.log("exactNameMatches: ", exactNameMatches);
+    console.log("exactNameMatches.length: ", exactNameMatches.length);
+
+    let errorMessage = '';
+
+    if (exactNameMatches.length > 0) {
+      console.log("exactNameMatches 1: ", exactNameMatches);
+      const mentor = exactNameMatches[0];
+
+      switch (mentor.filterReason) {
+        case 'NO_CAPACITY':
+          errorMessage = mentor.Name + ' ' + capacityCriteria;
+          break;
+        case 'EXISTING_RELATIONSHIP':
+          errorMessage = mentor.Name + ' ' + mentormenteerelationshipCriteria;;
+          break;
+        // case 'MENTEE_ONLY':
+        //   errorMessage = `${mentor.Name} has only registered as a 'mentee', so they are not appearing in search results.`;
+        //   break;
+        default:
+          errorMessage = couldntFindMentorsCriteria;
+         
+      }
+      
+    }else{
+      console.log("exactNameMatches 2: ", exactNameMatches);
+        errorMessage = couldntFindMentorsCriteria;
+      }
+
+//console.log("errorMessage: ", errorMessage);
+      if (errorMessage) {
+        this.filterErrorMessage = errorMessage;
+      }
+  }//change start
+
+
+  async processMentors(mentorResponse) {
+    console.log("processMentors", mentorResponse.length);
+    const parsedMentors = mentorResponse;
+
+    for (let i = 0; i < parsedMentors.length; i++) {
+      if (parsedMentors[i][CERTIFICATIONS_FIELD.fieldApiName]?.split(";")?.includes("Sales Leader Excellence Coach")) {
+        parsedMentors[i].salesLeader = true;
+      }
+    }
+    this.mentorData = parsedMentors;
+    this.filterResults();
+    this.loading = false;
+  }
+
+  @api async filterResults() {
+    let initialsMentorsLenght = this.filteredMentors?.length;
+
+    this.filteredMentors = this.mentorData;
+    // Filter results based on search term
+    console.log(' this.filteredMentors>>>>>>>>>>>>>>>>>' + JSON.stringify(this.filteredMentors));
+    if (this.searchTerm) {
+      const lowerCaseSearchTerm = this.searchTerm.toLowerCase();
+
+      this.filteredMentors = this.filteredMentors.filter((mentor) => {
+        const nameMatch = mentor.Name ? mentor.Name.toLowerCase().includes(lowerCaseSearchTerm) : false;
+        const titleMatch = mentor.Title ? mentor.Title.toLowerCase().includes(lowerCaseSearchTerm) : false;
+        const cityMatch = mentor.City ? mentor.City.toLowerCase().includes(lowerCaseSearchTerm) : false;
+        const skillMatch = mentor.Skills__c ? mentor.Skills__c.toLowerCase().includes(lowerCaseSearchTerm) : false;
+        const businessUnitMatch = mentor[BUSINESS_UNIT_FIELD.fieldApiName] ? mentor[BUSINESS_UNIT_FIELD.fieldApiName].toLowerCase().includes(lowerCaseSearchTerm) : false;
+        const costCenterMatch = mentor[COST_CENTER_FIELD.fieldApiName] ? mentor[COST_CENTER_FIELD.fieldApiName].toLowerCase().includes(lowerCaseSearchTerm) : false;
+        return nameMatch || titleMatch || cityMatch || businessUnitMatch || costCenterMatch || skillMatch;
+      });
+    } else {
+      this.filteredMentors = this.mentorData;
+    }
+    if (this.filteredMentors.length < 2 && initialsMentorsLenght > this.filteredMentors.length && !this.isSearchTermChange) {
+      const result = await filterMentorsInsufficientModal.open({
+        size: 'medium',
+        description: 'Insufficient Mentors returned'
+      });
+      if (result == 'reset') {
+        this.resetFilters();
+      }
+    }
+  }
+
+  @api searchHandler(event) {
+    this.searchTerm = event.detail;
+    this.isSearchTermChange = true;
+    this.handleRetrieveMentors();
+  }
+
+
+  filterChangedHandler(event) {
+    console.log(' $$ C ' + event.detail);
+
+    if (event.detail.remove) {
+      console.log(' $ In remove');
+      const theActiveFilters = JSON.parse(JSON.stringify([...this.filterCategories]));
+      for (let i = 0; i < theActiveFilters.length; i += 1) {
+        if (theActiveFilters[i].id === event.detail.remove.id) {
+          theActiveFilters.splice(i, 1);
         }
-        
-        // Create mentoring match
-        Mentoring_Match__c match = new Mentoring_Match__c();
-        
-        // Check if match exists already
-        Integer matchCount = [SELECT count() FROM Mentoring_Match__c WHERE Mentor__c =: mentorId AND Mentee__c =: menteeId AND (Status__c = 'Bookmarked' OR Status__c = 'Unbookmarked') WITH SECURITY_ENFORCED];
-        
-        if (matchCount > 0) {
-            match = [SELECT Id, Name, Mentor__c, Mentee__c, Status__c, Score__c FROM Mentoring_Match__c WHERE Mentor__c =: mentorId AND Mentee__c =: menteeId AND (Status__c = 'Bookmarked' OR Status__c = 'Unbookmarked') WITH SECURITY_ENFORCED LIMIT 1];
-        }
-        match.Mentor__c = mentorId;
-        match.Mentee__c = menteeId;
-        match.Status__c = status;
-        // match.Status__c = match.Status__c == 'Bookmarked' ? 'Unbookmarked' : 'Bookmarked';
-        
-        if (removalReason != null) {
-            match.Dismissal_Reason__c = removalReason;
-        }
-        
-        if (removalInformation!= null) {
-            match.Dismissal_Additional_Information__c = removalInformation;
-        }
-        
-        if (score != null) {
-            match.Score__c = score;
-        }
-        
-        if (requestMessage != null && requestMessage != '') {
-            match.Request_Message__c = requestMessage;
-        }
-        
-        if (responseMessage != null && responseMessage != '') {
-            match.Response_Message__c = responseMessage;
-        }
-        
-        // Insert mentoring match
-        try {
-            if (Schema.sObjectType.Mentoring_Match__c.isCreateable()&& Schema.sObjectType.Mentoring_Match__c.isUpdateable()){
-                upsert  match;   
+      }
+      this.filterCategories = theActiveFilters;
+    } else {
+      console.log(' $ In Add');
+      if (this.filterCategories) {
+        const theActiveFilters = JSON.parse(JSON.stringify([...this.filterCategories]));
+        for (const elem of event.detail) {
+
+          let exists = false;
+          for (let i = 0; i < theActiveFilters.length; i += 1) {
+            console.log(' $ In Add' + elem.id);
+            console.log(' $ In Add' + theActiveFilters[i].id);
+            try {
+              if (theActiveFilters[i].id === elem.id) {
+                exists = true;
+                //theActiveFilters.splice(elem);
+              }
+            } catch (e) {
+              console.log('Failed to Parse' + e);
             }
-            
-            
-            
-        } catch(Exception e) {
-            throw new AuraHandledException('Opps! Something went wrong: ' + e.getMessage());
+
+          }
+          if (!exists) {
+            theActiveFilters.push(elem);
+          }
+
         }
-        return match;
-    }    
-    
-    // Retrieve current user's mentees based on mentoring match status
-    @AuraEnabled
-    public static List<Mentoring_Match__c> retrieveMenteesFromOrg(String status){
-        List<Mentoring_Match__c> mentoringMatches = [SELECT 
-                                                     Id, 
-                                                     Name, 
-                                                     Mentor__c, 
-                                                     Request_Message__c,
-                                                     Response_Message__c,
-                                                     Mentor__r.Name,
-                                                     Mentee__r.Name, 
-                                                     Mentee__r.Id, 
-                                                     Mentee__r.AboutMe, 
-                                                     Mentee__r.City, 
-                                                     Mentee__r.Email, 
-                                                     Mentee__r.MediumPhotoUrl, 
-                                                     Mentee__r.Title,
-                                                     Mentee__r.Hire_Date__c, 
-                                                     Mentee__r.Equality_Group_Member__c,
-                                                     Mentee__c, 
-                                                     Status__c,
-                                                     Score__c
-                                                     FROM Mentoring_Match__c WHERE Mentor__c =: UserInfo.getUserId() AND Status__c =: status WITH SECURITY_ENFORCED]; 
-        return mentoringMatches;   
+        this.filterCategories = theActiveFilters;
+      } else {
+        this.filterCategories = event.detail;
+      }
     }
-    
-    // Creates new mentor match
-    @AuraEnabled
-    public static Mentoring_Match__c createMentoringMatch(Id mentorId, Id menteeId, String status, String requestMessage, String responseMessage, Integer score, String removalReason, String removalInformation, String interestReason, String interestInformation){
-        // Throw error if both menteeId and mentorId aren't provided
-        if (mentorId == null && menteeId == null) {
-            throw new AuraHandledException('Oops! Something went wrong: Please provide at least a menteeId or a mentorId');
-        }
-        
-        // Either mentorId or menteeId should be the current user
-        if (mentorId == null) {
-            mentorId = UserInfo.getUserId();
-        }
-        if (menteeId == null) {
-            menteeId = UserInfo.getUserId();
-        }
-        
-        // Create mentoring match
-        Mentoring_Match__c match = new Mentoring_Match__c();
-        
-        // Check if match exists already
-        Integer matchCount = [SELECT count() FROM Mentoring_Match__c WHERE Mentor__c =: mentorId AND Mentee__c =: menteeId WITH SECURITY_ENFORCED];
-        if (matchCount > 0) {
-            match = [SELECT Id, Name, Mentor__c, Mentee__c, Status__c, Score__c FROM Mentoring_Match__c WHERE Mentor__c =: mentorId AND Mentee__c =: menteeId  WITH SECURITY_ENFORCED LIMIT 1];
-        }
-        
-        match.Mentor__c = mentorId;
-        match.Mentee__c = menteeId;
-        match.Status__c = status;
-        
-        if (removalReason != null) {
-            match.Dismissal_Reason__c = removalReason;
-        }
-        
-        if (removalInformation!= null) {
-            match.Dismissal_Additional_Information__c = removalInformation;
-        }
-        
-        if (score != null) {
-            match.Score__c = score;
-        }
-        
-        if (requestMessage != null && requestMessage != '') {
-            match.Request_Message__c = requestMessage;
-        }
-        
-        if (responseMessage != null && responseMessage != '') {
-            match.Response_Message__c = responseMessage;
-        }
-        
-        // Insert mentoring match
-        try {
-            if (Schema.sObjectType.Mentoring_Match__c.isCreateable()&& Schema.sObjectType.Mentoring_Match__c.isUpdateable()){
-                upsert  match;   
-            }
-            
-            
-            
-        } catch(Exception e) {
-            throw new AuraHandledException('Opps! Something went wrong: ' + e.getMessage());
-        }
-        return match;
+    console.log(' $$ this.filterCategories ' + this.filterCategories);
+
+    const certificationsList = [];
+    const typeOfMentoringList = [];
+    const functionalCompetenciesList = [];
+    const languagesList = [];
+    const experiencesList = [];
+    const egcsList = [];
+    const greatCompetenciesList = [];
+    const locationsList = [];
+
+    this.filterCategories.forEach((filter) => {
+      if (filter.filterField === CERTIFICATIONS_FIELD.fieldApiName) {
+        certificationsList.push(filter.id);
+      }
+      if (filter.filterField === MENTEE_TYPE_FIELD.fieldApiName) {
+        typeOfMentoringList.push(filter.id);
+      }
+      if (filter.filterField === FUNCTIONAL_COMPETENCIES_FIELD.fieldApiName) {
+        functionalCompetenciesList.push(filter.id);
+      }
+      if (filter.filterField === LANGUAGES_FIELD.fieldApiName) {
+        languagesList.push(filter.id);
+      }
+      if (filter.filterField === EXPERIENCES_FIELD.fieldApiName) {
+        experiencesList.push(filter.id);
+      }
+      if (filter.filterField === EGC_FIELD.fieldApiName) {
+        egcsList.push(filter.id);
+      }
+      if (filter.filterField === GREAT_COMPETENCIES_FIELD.fieldApiName) {
+        greatCompetenciesList.push(filter.id);
+      }
+      if (filter.fieldApiName === MENTOR_LOCATION_FIELD.fieldApiName) {
+        locationsList.push(filter.id);
+      }
+    });
+    this.certifications = certificationsList;
+    this.typeOfMentoring = typeOfMentoringList;
+    this.functionalCompetencies = functionalCompetenciesList;
+    this.languages = languagesList;
+    this.experiences = experiencesList;
+    this.egcs = egcsList;
+    this.greatCompetencies = greatCompetenciesList;
+    this.locations = locationsList;
+  }
+
+  resetFilters() {
+    this.filterCategories = '';
+    localStorage.clear();
+    localStorage.setItem("activeFilters", '');
+
+    this.certifications = [];
+    this.typeOfMentoring = [];
+    this.functionalCompetencies = [];
+    this.languages = [];
+    this.experiences = [];
+    this.egcs = [];
+    this.greatCompetencies = [];
+    this.locations = [];
+
+    this.filterChangedHandler({ detail: [] });
+    this.filterResults();
+    this.template.querySelector("c-filter-panel").resetFilters();
+    this.handleRetrieveMentors();
+  }
+
+  calculateYears(hireDate) {
+    const yearDifMs = Date.now() - hireDate;
+    const yearDate = new Date(yearDifMs);
+    return Math.abs(yearDate.getUTCFullYear() - 1970);
+  }
+
+  toggleFilters() {
+    this.showFilters = !this.showFilters;
+  }
+
+  toggleUserView() {
+    this.showUser = !this.showUser;
+  }
+
+  userSelectedHandler(event) {
+
+
+    this[NavigationMixin.Navigate]({
+      type: "standard__recordPage",
+      attributes: {
+        recordId: event.detail.user.Id,
+        actionName: "view",
+      },
+    });
+  }
+  handleOpenRecordClick(event) {
+
+  }
+
+  // GETTERS
+  get noMentorsFound() {
+    if (!this.filteredMentors) {
+      return true;
     }
-    
-    // Counts mentors and mentees for current user
-    @AuraEnabled(Cacheable=true)
-    public static List<Integer> countMentors(Id recordId){
-        List<Integer> countArray = new List<Integer>();
-        try {
-            Integer mentors = [SELECT count() FROM Mentoring_Match__c WHERE Mentee__c =: recordId AND Status__c = 'Accepted' WITH SECURITY_ENFORCED];
-            Integer mentees = [SELECT count() FROM Mentoring_Match__c WHERE Mentor__c =: recordId AND Status__c = 'Accepted' WITH SECURITY_ENFORCED];
-            countArray.add(mentors);
-            countArray.add(mentees);
-        } catch(Exception e) {
-            throw new AuraHandledException('Opps! Something went wrong: ' + e.getMessage());
-        }
-        return countArray;
+    if (!this.filteredMentors.length > 0) {
+      return true;
     }
-    
-    // Retrieves all functional competencies selected for each role record 
-    @AuraEnabled(Cacheable=true)
-    public static List<PicklistWrapper> retrieveRolesAndCompetencies(){
-        
-        try {
-            List<PicklistWrapper> theReturnList = new List<PicklistWrapper>();
-            Schema.DescribeFieldResult theFCDescribe = User.Functional_Competencies__c.getDescribe();
-            // Get picklist values from field description
-            List<Schema.PicklistEntry> entries = theFCDescribe.getPicklistValues();
-            List<Functional_Role__c> theFRs = [SELECT Id, Name, Functional_Competencies__c FROM Functional_Role__c WITH SECURITY_ENFORCED ORDER BY name ASC LIMIT 1000];
-            
-            for(Functional_Role__c theOrigFR : theFRs){
-                PicklistWrapper thePW = new PicklistWrapper();
-                thePW.role = theOrigFR;
-                List<PicklistInfo> thePVI = new List<PicklistInfo>();
-                List<String> theOrigFRValues = theOrigFR.Functional_Competencies__c.split(';');
-                for (Schema.PicklistEntry entry : entries) {
-                    for (String theOrigFRVal : theOrigFRValues) {
-                        if(entry.getValue() == theOrigFRVal){
-                            PicklistInfo theNewVal = new PicklistInfo();
-                            theNewVal.label = thePW.role.Name+'-'+entry.getLabel();
-                            theNewVal.value = entry.getValue();
-                            thePVI.add(theNewVal);
-                        }
-                    }
-                }
-                thePW.values = thePVI;
-                theReturnList.add(thePW);
-            }
-            System.debug('theFRs: ' + theFRs);
-            System.debug('theReturnList: ' + theReturnList);
-            
-            return theReturnList;
-        } catch (Exception e) {
-            throw new AuraHandledException('Opps! Something went wrong: ' + e.getMessage());
-        }
+    return false;
+  }
+
+  get isMobile() {
+    return screen.width <= 768;
+  }
+
+  get availableMentors() {
+    const theSortedMentors = JSON.parse(JSON.stringify([...this.filteredMentors]));
+
+    for (let i = 0; i < theSortedMentors.length; i++) {
+      if (theSortedMentors[i][CERTIFICATIONS_FIELD.fieldApiName]?.split(";")?.includes("Sales Leader Excellence Coach")) {
+        theSortedMentors[i].salesLeader = true;
+      }
     }
-    
-    // Retrieve current program stages from mentoring match id
-    @AuraEnabled(cacheable=true)
-    public static ProgramWrapper retrieveProgramStagesFromMentoringMatch(String matchId){
-        
-        List<Program__c> allMatchPrograms = [SELECT Id, CreatedDate FROM Program__c WHERE Mentoring_Match__c = :matchId WITH SECURITY_ENFORCED ORDER BY CreatedDate DESC LIMIT 1];
-        String theMatchProgramId = allMatchPrograms[0].Id;
-        
-        ProgramWrapper thePW = new ProgramWrapper();
-        thePW.program = allMatchPrograms[0];
-        System.debug('theMatchProgramId: ' + theMatchProgramId);
-        try {
-            if(allMatchPrograms.size() > 0){
-                List<Program_Stage__c> theProgramStages = [SELECT Id, Name, Completed__c, Program__c, Program_Template_Stage__c FROM Program_Stage__c WHERE Program__c = :theMatchProgramId WITH SECURITY_ENFORCED];
-                List<String> thePSTids = new List<String>();
-                for(Program_Stage__c thePS : theProgramStages){
-                    thePSTids.add(thePS.Program_Template_Stage__c);
-                }
-                List<Program_Template_Stage__c> theProgramTemplateStages = [SELECT Id, Name, Order__c, Mentee_Description__c, Mentee_Links_Description__c, Mentee_Sessions_Description__c, Mentor_Description__c, Mentor_Links_Description__c, Mentor_Sessions_Description__c, (SELECT Id, Name, Order__c, Link__c, Visibility__c FROM Program_Template_Stage_Links__r ORDER BY Order__c ASC), (SELECT Id, Name, Order__c, Link__c, Visibility__c FROM Program_Template_Stage_Sessions__r ORDER BY Order__c ASC) FROM Program_Template_Stage__c WHERE Id IN :thePSTids WITH SECURITY_ENFORCED ORDER BY Order__c ASC];
-                List<ProgramStageWrapper> thePSWList = new List<ProgramStageWrapper>();
-                for(Program_Stage__c thePS : theProgramStages){
-                    for(Program_Template_Stage__c thePTS : theProgramTemplateStages){
-                        if(thePS.Program_Template_Stage__c == thePTS.Id){
-                            ProgramStageWrapper thePSW = new ProgramStageWrapper();
-                            thePSW.programStage = thePS;
-                            thePSW.programTemplateStage = thePTS;
-                            thePSWList.add(thePSW);
-                        }
-                    }
-                }
-                thePW.programStages = thePSWList;
-            }       
-        } catch (Exception e) {
-            throw new AuraHandledException('Opps! Something went wrong: ' + e.getMessage());
-        }
-        
-        
-        return thePW;   
+    let mentorsToreturn = [];
+    if (theSortedMentors.length > 50) mentorsToreturn = theSortedMentors.slice(0, 49);
+    else mentorsToreturn = theSortedMentors;
+    return mentorsToreturn;
+  }
+
+  get noAvailableMentors() {
+    return this.availableMentors ? this.availableMentors.length === 0 : true;
+  }
+
+  get getContainerClass() {
+    if (this.isMobile) {
+      return "slds-is-relative container";
     }
-    
-    // Retrieve all meetings from mentoring match id
-    @AuraEnabled(cacheable=true)
-    public static List<Meeting__c> retrieveMeetingsFromMentoringMatch(String matchId){
-        List<Meeting__c> allMeetings = [SELECT Id, CreatedDate, Meeting_Title__c, Meeting_Date_Time__c FROM Meeting__c WHERE Mentoring_Match__c = :matchId WITH SECURITY_ENFORCED];
-        return allMeetings;
-    }
-    
-    @AuraEnabled(Cacheable=false)
-    public static Decimal getJobGrade(String userId){
-        User currentUser = [SELECT 
-                            Id, Employee_Id__c
-                            FROM User WHERE Id =: userId WITH SECURITY_ENFORCED];
-        return getJobGradeByEmployeeId(currentUser.Employee_Id__c);
-        
-    }
-    
-    public static Decimal getJobGradeByEmployeeId(String employeeId){
-        Decimal currentUserJobGrade = 0;
-        String currentUserEmployeeId = employeeId;
-        if(String.isNotBlank(currentUserEmployeeId))
-        {
-            List<Contact> currentUserContact = [SELECT Id, ES_DJC_Grade__c FROM Contact WHERE EmployeeNumber__c= :currentUserEmployeeId and Recordtype.Name = 'Employee'];
-            currentUserJobGrade = currentUserContact.size() > 0 ? (String.isNotBlank(currentUserContact?.get(0)?.ES_DJC_Grade__c) ? Decimal.valueOf(currentUserContact?.get(0)?.ES_DJC_Grade__c.right(2)) : 0) : 0;
-        }
-        return currentUserJobGrade;
-    }
-    
-    @AuraEnabled(Cacheable=false)
-    public static List<User> retrieveMentors(List<String> certifications, List<String> typeOfMentoring, List<String> functionalCompetencies, List<String> languages, List<String> experiences, List<String> egcs, List<String> greatCompetencies, List<String> locations, String searchTerm){
-        
-        Id currentUserId = UserInfo.getUserId();
-        User currentUser = [SELECT 
-                            Id, Employee_Id__c
-                            FROM User WHERE Id =: UserInfo.getUserId() WITH SECURITY_ENFORCED];
-        Decimal currentUserJobGrade = getJobGradeByEmployeeId(currentUser.Employee_Id__c);
-        List<User> returnedUsers = new List<User>();
-        List<Mentoring_Match__c> previousMatches = [SELECT 
-                                                    Id, 
-                                                    Mentor__c 
-                                                    FROM Mentoring_Match__c WHERE Status__c != 'Cancelled' AND Status__c != 'Completed' AND Status__c != 'Bookmarked' AND Status__c != 'Unbookmarked' AND Mentee__c =: UserInfo.getUserId() WITH SECURITY_ENFORCED];
-        
-        String query = '';
-        String selectQuery = 'SELECT Name, Id, AboutMe, City, Capacity__c, Email, MediumPhotoUrl, Title, Hire_Date__c, Equality_Group_Member__c, Available__c, Country, Mentee_Type_Preference__c, Skills__c, Interests__c, Business_Unit__c, Cost_Center__c, Great_Competencies__c, Mentoring_Language__c, Certifications__c, Experiences__c, toLabel(Functional_Competencies__c), Limit_Mentees_to_2_Grades_down__c, Employee_Id__c, (SELECT Id, Mentor__c, Status__c FROM Mentoring_Matches__r WHERE Mentee__c = :currentUserId AND (Status__c = \''+ 'Bookmarked'+'\''+ ' OR Status__c = \''+ 'Unbookmarked'+'\' )) FROM User';
-        String limitQuery = ' LIMIT 50';
-        List<String> whereQueries = new List<String>();
-        whereQueries.add('isActive=true');//this filter will ensure, query is fetching only active employees
-        whereQueries.add('Completed_Mentor_Onboarding_Flow__c=true');//this filter will ensure, query is fetching mentors who have completed Onboarding Mentor flow
-        if(typeOfMentoring.size() > 0){
-            String tempQuery = 'Mentee_Type_Preference__c INCLUDES (\''+String.join(typeOfMentoring, ';')+'\')';
-            whereQueries.add(tempQuery);
-            limitQuery = '';
-        }
-        if(functionalCompetencies.size() > 0){
-            String tempQuery = 'Functional_Competencies__c INCLUDES (\''+String.join(functionalCompetencies, ';')+'\')';
-            whereQueries.add(tempQuery);
-            limitQuery = '';
-        }
-        if(experiences.size() > 0){
-            String tempQuery = 'Experiences__c INCLUDES (\''+String.join(experiences, ';')+'\')';
-            whereQueries.add(tempQuery);
-            limitQuery = '';
-        }
-        if(egcs.size() > 0){
-            String tempQuery = 'Equality_Group_Member__c INCLUDES (\''+String.join(egcs, ';')+'\')';
-            whereQueries.add(tempQuery);
-            limitQuery = '';
-        }
-        if(greatCompetencies.size() > 0){
-            String tempQuery = 'Great_Competencies__c INCLUDES (\''+String.join(greatCompetencies, ';')+'\')';
-            whereQueries.add(tempQuery);
-            limitQuery = '';
-        }
-        
-        if(locations.size() > 0){
-            String tempQuery = 'Mentee_Location_Preference__c INCLUDES (\''+String.join(locations, ';')+'\')';
-            whereQueries.add(tempQuery);
-            limitQuery = '';
-        }
-        if(searchTerm != ''){
-            String tempQuery = '(Name LIKE \'%'+searchTerm+'%\'' + 'Or Title LIKE\'%'+searchTerm+'%\'' + 'Or city LIKE \'%'+searchTerm+'%\'' + 'Or Skills__c INCLUDES (\''+searchTerm+'\'))';
-            whereQueries.add(tempQuery);
-            limitQuery = '';
-        }
-        
-        String tempNotCurrentUserQuery = 'Id != \''+UserInfo.getUserId()+'\'';
-        whereQueries.add(tempNotCurrentUserQuery);
-        
-        String tempAvailableQuery = 'Available__c = true';
-        whereQueries.add(tempAvailableQuery);
-        
-        String whereQuery = '';
-        if(whereQueries.size() > 0){
-            whereQuery = ' WHERE ' + String.join(whereQueries, ' AND ');
-        }
-        System.debug('whereQuery: '+ whereQuery );
-        String orderQuery = ' ORDER BY LastLoginDate DESC';
-        
-        String securityQuery = ' WITH SECURITY_ENFORCED';
-        if(limitQuery=='') {
-            query = selectQuery + whereQuery + securityQuery + orderQuery;
-        }
-        else {query = selectQuery + whereQuery + securityQuery + orderQuery + limitQuery;
-             }
-        String pattern = '\\\\';
-        String queryNew = String.escapeSingleQuotes(query);
-        queryNew = queryNew.replaceAll(pattern,'');
-        List<User> potentialUsers = database.query(queryNew);
-        List<User> ignoredFilterUsers = new List<User>();
-        Map<Id, Integer> currentMatchesCountPerMentor = new Map<Id, Integer>();
-        for(Mentoring_Match__c match : [SELECT Id, Mentor__c, Mentee__c, Status__c FROM Mentoring_Match__c WHERE Status__c = 'Accepted']){
-            Integer count = 0;
-            if(currentMatchesCountPerMentor.containsKey(match.Mentor__c)){
-                count = currentMatchesCountPerMentor.get(match.Mentor__c);
-            }
-            count++;
-            currentMatchesCountPerMentor.put(match.Mentor__c, count);
-        }
-        // Query Contact to get Mentor's Job Grade
-        Map<String, String> mapWorkedIdNJobGrade = new Map<String, String>();
-        Set<String> workedIdsSet = new Set<String>();
-        for (User user : potentialUsers) {
-            if(user.Limit_Mentees_to_2_Grades_down__c == true && String.isNotBlank(user.Employee_Id__c)){
-                workedIdsSet.add(user.Employee_Id__c);
-            }
-        }
-        for(Contact eachCon: [SELECT Id, EmployeeNumber__c, ES_DJC_Grade__c FROM Contact WHERE EmployeeNumber__c IN :workedIdsSet and RecordType.Name = 'Employee']){
-            mapWorkedIdNJobGrade.put(eachCon.EmployeeNumber__c, eachCon.ES_DJC_Grade__c);
-        }
-        // Check if user has previously engaged with the mentor   
-        for (User user : potentialUsers) {
-            Integer menteeCount = 0;
-            Boolean addUser = true;
-            if (user.Capacity__c != null && currentMatchesCountPerMentor.containsKey(user.Id)) {
-                menteeCount = currentMatchesCountPerMentor.get(user.Id);
-                if (menteeCount >= user.Capacity__c) {
-                    addUser = false;
-                }
-            }
-            if(user.Limit_Mentees_to_2_Grades_down__c == true && addUser && mapWorkedIdNJobGrade.containsKey(user.Employee_Id__c) && Decimal.valueOf(mapWorkedIdNJobGrade.get(user.Employee_Id__c).right(2)) != 0){
-                Decimal mentorJobGrade = Decimal.valueOf(mapWorkedIdNJobGrade.get(user.Employee_Id__c).right(2));
-                Decimal jobGradeDiff = mentorJobGrade - currentUserJobGrade;
-                addUser = jobGradeDiff <= 2 && jobGradeDiff > 0;
-            }
-            if (addUser == true) {
-                for (Mentoring_Match__c dismissedMatch : previousMatches) {
-                    if (user.Id == dismissedMatch.Mentor__c) {
-                        addUser = false;
-                    }
-                }
-            }
-            if (addUser == true) {
-                Boolean isCertificationMatch = certifications.isEmpty();
-                if(!certifications.isEmpty() && checkMultiSelectValuesAgainstList(user.Certifications__c, certifications)) {
-                    isCertificationMatch = true;
-                }
-                if(isCertificationMatch && !languages.isEmpty() &&  checkMultiSelectValuesAgainstList(user.Mentoring_Language__c, languages)){
-                    returnedUsers.add(user);
-                }
-                else{
-                    ignoredFilterUsers.add(user);
-                }
-            }
-        }
-        
-        if(returnedUsers.size() < 2 && ignoredFilterUsers?.size() > 0){
-            returnedUsers.addAll(ignoredFilterUsers);
-        }
-        
-        return returnedUsers;
-    }
-    
-    public static boolean checkMultiSelectValuesAgainstList(String mentorfield, List<String> selectedFilters){
-        boolean contains = !String.isBlank(mentorfield);
-        if(!String.isBlank(mentorfield) && selectedFilters.size() > 0){
-            for(String filter: selectedFilters){
-                if(!mentorfield.contains(filter)){
-                    contains = false;
-                    return contains;
-                }
-            }
-        }
-        return contains;
-    }
-    
-    public class PicklistWrapper {
-        @AuraEnabled
-        public Functional_Role__c role {get;set;}
-        @AuraEnabled
-        public List<PicklistInfo> values {get;set;}
-        
-        public PicklistWrapper(){
-        }
-        
-        public PicklistWrapper(Functional_Role__c theR, List<PicklistInfo> thePVs){
-            role = theR;
-            values = thePVs;
-        }
-    }
-    
-    public class PicklistInfo {
-        @AuraEnabled
-        public String label {get;set;}
-        @AuraEnabled
-        public String value {get;set;}
-        
-        public PicklistInfo(){
-        }
-        
-        
-        public PicklistInfo(String theL, String theV){
-            label = theL;
-            value = theV;
-        }
-    }
-    
-    public class ProgramWrapper {
-        @AuraEnabled
-        public Program__c program {get;set;}
-        @AuraEnabled
-        public List<ProgramStageWrapper> programStages {get;set;}
-        
-        public ProgramWrapper(){
-        }
-        
-        
-        public ProgramWrapper(Program__c theP, List<ProgramStageWrapper> thePS){
-            program = theP;
-            programStages = thePS;
-        }
-    }
-    
-    public class ProgramStageWrapper {
-        @AuraEnabled
-        public Program_Stage__c programStage {get;set;}
-        @AuraEnabled
-        public Program_Template_Stage__c programTemplateStage {get;set;}
-        
-        public ProgramStageWrapper(){
-        }
-        
-        
-        public ProgramStageWrapper(Program_Stage__c thePS, Program_Template_Stage__c thePST){
-            programStage = thePS;
-            programTemplateStage = thePST;
-        }
-    }
-    
-    @AuraEnabled 
-    public static void updateLogHours(Id userId, Integer hoursLogged) {
-        User currentUser = [SELECT Id, Hours_Logged__c FROM User WHERE Id =: userId WITH SECURITY_ENFORCED];
-        if(currentUser != null) {
-            currentUser.Hours_Logged__c = currentUser.Hours_Logged__c != null ? currentUser.Hours_Logged__c + hoursLogged : hoursLogged;
-        }
-        update currentUser;
-    }
-    
-    @AuraEnabled( cacheable=true )  
-    public static Boolean getMentoringMatch(ID mentorId, Id menteeId) {
-        List<Mentoring_Match__c> matchResults = [SELECT id, Name FROM Mentoring_Match__c WHERE Mentor__c =: mentorId AND Mentee__c =: menteeId WITH SECURITY_ENFORCED];
-        if(matchResults.size()>0) {
-            return true;
-        }
-        else {
-            return false; 
-        }
-    }
-    
-    @AuraEnabled(cacheable=true)
-    public static User getCurrentUserDetails() {
-        return [
-            SELECT Name, Available__c, Completed_Mentor_Onboarding_Flow__c, Completed_Mentee_Onboarding_Flow__c, Mentoring_Mode__c
-            FROM User 
-            WHERE Id = :UserInfo.getUserId()
-        ];
-    }
-    
- @AuraEnabled(cacheable=false)
-    public static String updateCurrentUserDetails(Id userId, Boolean availableFlag) {
-        try {
-            User u = [SELECT Available__c FROM User WHERE Id =: userId];
-            u.Available__c = availableFlag;
-            update u;
-            return 'Success';
-        } catch(Exception e) {
-            System.debug('Exception### ' +e.getMessage());
-             return 'Failure due to ' +e.getMessage();
-        }
-    }
+    return "slds-is-relative container searchbar-edit";
+  }
 }
