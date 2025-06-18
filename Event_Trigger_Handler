@@ -1,0 +1,226 @@
+public class Event_Trigger_Handler {
+    public static Boolean createException = false;
+    public Event_Trigger_Handler(){
+        createException = SM_Common.checkTrigger('ExceptionHandling');
+    }
+    
+    public void handleAfterInsert(List<Event> newEvents) {
+        List<Event> qualifiedEvents = filterQualifiedEvents(newEvents);
+        
+        if (!qualifiedEvents.isEmpty()) {
+            createOpportunitiesAndCases(qualifiedEvents);
+        }
+    }
+    
+    public void handleAfterUpdate(List<Event> newEvents, Map<Id, Event> oldEventsMap) {
+        List<Event> eventsToProcess = new List<Event>();
+        
+        for (Event newEvent : newEvents) {
+            Event oldEvent = oldEventsMap.get(newEvent.Id);
+            
+            if (newEvent.WhatId != oldEvent.WhatId) {
+                eventsToProcess.add(newEvent);
+            }
+        }
+        
+        List<Event> qualifiedEvents = filterQualifiedEvents(eventsToProcess);
+        
+        if (!qualifiedEvents.isEmpty()) {
+            createOpportunitiesAndCases(qualifiedEvents);
+        }
+    }
+    
+    private List<Event> filterQualifiedEvents(List<Event> events) {
+        List<Event> qualifiedEvents = new List<Event>();
+        Set<Id> whatIds = new Set<Id>();
+        for (Event evt : events) {
+            if (evt.WhatId != null && String.valueOf(evt.WhatId).startsWith('001')) {
+                whatIds.add(evt.WhatId);
+            }
+        }
+        
+        Map<Id, Account> accountMap = new Map<Id, Account>([
+            SELECT Id, Name, CurrencyIsoCode 
+            FROM Account 
+            WHERE Id IN :whatIds
+        ]);
+        
+        for (Event evt : events) {
+            if (evt.WhatId != null && 
+                accountMap.containsKey(evt.WhatId) && 
+                String.isNotBlank(evt.InviteeUuid__c)) {
+                qualifiedEvents.add(evt);
+            }
+        }
+        
+        return qualifiedEvents;
+    }
+    
+    private void createOpportunitiesAndCases(List<Event> qualifiedEvents) {
+        try{
+        List<User> forcebot = [SELECT Id FROM User WHERE Name = 'SiteMinder Forcebot' LIMIT 1];
+        Id forcebotId = !forcebot.isEmpty() ? forcebot[0].Id : UserInfo.getUserId();
+        system.debug('forcebotId :'+forcebotId);
+        
+        Set<Id> accountIds = new Set<Id>();
+        for (Event evt : qualifiedEvents) {
+            accountIds.add(evt.WhatId);
+        }
+        system.debug('accountIds :'+accountIds);
+        
+        Map<Id, Account> accountMap = new Map<Id, Account>([
+            SELECT Id, Name, CurrencyIsoCode
+            FROM Account
+            WHERE Id IN :accountIds
+        ]);
+        system.debug('accountMap :'+accountMap);
+        
+        Set<String> uuid = new Set<String>();
+        for (Event evt : qualifiedEvents){
+           uuid.add(evt.InviteeUuid__c); 
+        }
+        Map<String,CalendlyAction__c> calendlyMap = new Map<String,CalendlyAction__c>();
+        List<CalendlyAction__c> caList = [Select Id,InviteeFirstName__c,InviteeLastName__c,CustomResponse2__c,EventPrimaryPublisherEmail__c,
+                                InviteeEmail__c,CustomResponse3__c,CustomResponse4__c,InviteeUuid__c from CalendlyAction__c Where InviteeUuid__c =: uuid And Name ='invitee.created'];
+        
+        for(CalendlyAction__c ca : caList){
+           calendlyMap.put(ca.InviteeUuid__c,ca); 
+        }
+        system.debug('calendlyMap :'+calendlyMap);
+        
+        List<Opportunity> opportunitiesToInsert = new List<Opportunity>();
+        List<Case> casesToInsert = new List<Case>();
+        
+        for (Event evt : qualifiedEvents) {
+            if (!accountMap.containsKey(evt.WhatId)) {
+                continue;
+            }
+            
+            Account relatedAccount = accountMap.get(evt.WhatId);
+            CalendlyAction__c calendly = calendlyMap.get(evt.InviteeUuid__c);
+            
+            Opportunity opp = createOpportunityFromEvent(evt, relatedAccount, forcebotId, calendly);
+            system.debug('opp :'+opp);
+            opportunitiesToInsert.add(opp);
+            
+            Case caseRecord = createCaseFromEvent(evt, relatedAccount, calendly);
+            system.debug('caseRecord :'+caseRecord);
+            casesToInsert.add(caseRecord);
+        }
+        
+        List<Opportunity> oppList = saveOpportunities(opportunitiesToInsert);
+        saveCases(casesToInsert, oppList);
+        } catch (Exception e) {
+            if(createException){
+                SM_CaseDetailWrapper.CommonExceptionWrapper exceWrapObj = SM_Common.createWrapperLogObj('Event_Trigger_Handler', 'createOpportunitiesAndCases', '', e);
+                SM_Common.insertErrorLog(exceWrapObj);
+            } 
+        }
+    }
+    
+    private Opportunity createOpportunityFromEvent(Event evt, Account acct, Id ownerId, CalendlyAction__c calendly) {
+        String StandardRecordTypeID = SM_Common.GetRecordTypeId('Opportunity','Standard');
+        String oppName = acct.Name + ' - Retraining Fee';
+        system.debug('StandardRecordTypeID :'+StandardRecordTypeID);
+        system.debug('oppName :'+oppName);
+        
+        String importantNotes = createImportantNotes(calendly);
+        system.debug('importantNotes :'+importantNotes);
+        
+        Opportunity opp = new Opportunity(
+            OwnerId = ownerId,
+            RecordTypeId = StandardRecordTypeID,
+            Contact_Name__c = evt.WhoId,
+            Billing_Contact__c = evt.WhoId,
+            Training_Contact__c = evt.WhoId,
+            Name = oppName,
+            AccountId = acct.Id,
+            StageName = CustomConstants.OPPORTUNITY_STAGENAME_CLOSED_WON_SALEWON,
+            CloseDate = Date.today(),
+            Type = CustomConstants.OPP_Type,
+            Amount = 150,
+            LeadSource = 'Display',
+            CurrencyIsoCode = acct.CurrencyIsoCode,
+            ProductDemoCompleted__c = CustomConstants.NO,
+            Important_Notes__c = importantNotes,
+            Free_trial_period__c = '0',
+            Previous_Amount__c = 0,
+            Products__c = 'Retraining Fee'
+        );
+        system.debug('opp :'+opp);
+        return opp;
+    }
+    
+    private Case createCaseFromEvent(Event evt, Account acct, CalendlyAction__c calendly) {
+       String StandardRecordTypeID = SM_Common.GetRecordTypeId('Case','Standard Case');
+        String caseSubject = 'Retraining case: ' + calendly.CustomResponse2__c + ' + Platform';
+        system.debug('StandardRecordTypeID :'+StandardRecordTypeID);
+        system.debug('caseSubject :'+caseSubject);
+        
+        String caseDescription = createImportantNotes(calendly);
+        system.debug('caseDescription :'+caseDescription);
+        
+        Case caseRecord = new Case(
+            AccountId = acct.Id,
+            Subject = caseSubject,
+            RecordTypeId = StandardRecordTypeID,
+            Description = caseDescription,
+            //Type = 'Retraining',
+            OwnerId = evt.OwnerId,
+            Origin = 'Chat',
+            Status = 'Open'
+        );
+        system.debug('caseRecord :'+caseRecord);
+        return caseRecord;
+    }
+    
+    private String createImportantNotes(CalendlyAction__c ca) {
+        String notes = 'Trainee Name: ' + ca.InviteeFirstName__c + ' ' + ca.InviteeLastName__c + '\n';
+        notes += 'Property name: ' + ca.CustomResponse2__c + '\n';
+        notes += 'Contact Number: ' + '\n';
+        notes += 'Email Address: ' + ca.InviteeEmail__c + '\n';
+        notes += 'What is your user role? ' + ca.CustomResponse3__c + '\n';
+        notes += 'Who else will be attending the session and what are their roles? ' + ca.CustomResponse4__c + '\n';
+        notes += 'Are there any specific topics or questions you would like to cover? ';
+        
+        return notes;
+    }
+    
+    private List<Opportunity> saveOpportunities(List<Opportunity> opportunities) {
+        if (opportunities.isEmpty()) return null;
+        
+        system.debug('opportunities :'+opportunities);
+        try {
+            insert opportunities;
+            system.debug('opportunities :'+opportunities);
+        } catch (Exception e) {
+            if(createException){
+                SM_CaseDetailWrapper.CommonExceptionWrapper exceWrapObj = SM_Common.createWrapperLogObj('Event_Trigger_Handler', 'saveOpportunities', '', e);
+                SM_Common.insertErrorLog(exceWrapObj);
+            }
+        }
+        return opportunities;
+    }
+    
+    private void saveCases(List<Case> cases, List<Opportunity> opportunities) {
+        if (cases.isEmpty()) return;
+        Map<String,String> oppMap = new Map<String,String>();
+        for(Opportunity opp : opportunities){
+           oppMap.put(opp.AccountId,opp.Id); 
+        }
+        for(Case ca : cases){
+           String oppId = oppMap.get(ca.AccountId); 
+           ca.Associated_Opportunity__c = oppId;
+        }
+        system.debug('cases :'+cases);
+        try {
+            insert cases;
+            system.debug('cases :'+cases);
+        } catch (Exception e) {
+            if(createException){
+                SM_CaseDetailWrapper.CommonExceptionWrapper exceWrapObj = SM_Common.createWrapperLogObj('Event_Trigger_Handler', 'saveCases', '', e);
+                SM_Common.insertErrorLog(exceWrapObj);
+            } 
+        }
+    }
+}
