@@ -1,0 +1,204 @@
+public class CalendlyActionCalloutQueueable implements Queueable, Database.AllowsCallouts {
+    public static Boolean createException = false;
+    
+    private CalendlyAction__c calendlyAction;
+    
+    public CalendlyActionCalloutQueueable() {
+        createException = SM_Common.checkTrigger('ExceptionHandling'); 
+    }
+    
+    public void setCalendlyAction(CalendlyAction__c calendlyAction) {
+        this.calendlyAction = calendlyAction;
+        System.debug('this.calendlyAction ' + this.calendlyAction);
+    }
+    
+    public void execute(QueueableContext context) {
+        makeCalloutToSupportCodesAPI();
+    }
+    
+    private void makeCalloutToSupportCodesAPI() {
+        try {
+            Map<String, AppConfiguration__mdt> appConfigNameToValue = new Map<String, AppConfiguration__mdt>();
+            appConfigNameToValue = AppConfiguration__mdt.getAll();
+            AppConfiguration__mdt API_KEY = appConfigNameToValue.get(
+                'Aux_API_KEY'
+            );
+            AppConfiguration__mdt EndpointUrl = appConfigNameToValue.get(
+                'Aux_Base_Url'
+            );
+            
+            String customResponse = calendlyAction.CustomResponse1__c.trim();
+            
+            String baseUrl = EndpointUrl.Value__c +customResponse;
+            
+            HttpRequest req = new HttpRequest();
+            req.setEndpoint(baseUrl);
+            req.setMethod('GET');
+            
+            req.setHeader('x-api-key', API_KEY.Value__c);
+            req.setHeader('x-sm-trace-token', 'wilco');
+            req.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+            req.setHeader('Accept', '*/*');
+            req.setHeader('Accept-Encoding', 'gzip, deflate, br');
+            req.setHeader('Connection', 'keep-alive');
+            req.setHeader('Cache-Control', 'no-cache');
+            req.setHeader('Postman-Token', System.now().getTime().format());
+            
+            Http http = new Http();
+            HttpResponse res = http.send(req);
+            
+            if (res.getStatusCode() == 200) {
+                String responseBody = res.getBody();
+                
+                Map<String, Object> responseMap = (Map<String, Object>) JSON.deserializeUntyped(responseBody);
+                if (responseMap.containsKey('spid')) {
+                    String spid = String.valueOf(responseMap.get('spid'));
+                    //createEventForCalendlyAction(spid);
+                    System.debug('API call successful. SPID ID: ' + spid);
+                    createTaskForCalendlyAction(spid);
+                }else{
+                   //createEventForCalendlyAction(null); 
+                    createTaskForCalendlyAction(null);
+                }
+                
+                System.debug('API call successful. Response: ' + responseBody);
+            } else {
+                //createEventForCalendlyAction(null);
+                createTaskForCalendlyAction(null);
+                System.debug('API call failed with status code: ' + res.getStatusCode());
+                System.debug('Response body: ' + res.getBody());
+            }
+        } catch (Exception e) {
+            //createEventForCalendlyAction(null);
+            createTaskForCalendlyAction(null);
+            System.debug('Exception occurred while making API callout: ' + e.getMessage());
+            if(createException){
+                SM_CaseDetailWrapper.CommonExceptionWrapper exceWrapObj = SM_Common.createWrapperLogObj('CalendlyActionCalloutQueueable', 'makeCalloutToSupportCodesAPI', '', e);
+                SM_Common.insertErrorLog(exceWrapObj);
+            }        
+        }
+    }
+    
+    private void createEventForCalendlyAction(String spid) {
+        try {
+            // Query for Account with matching SPID
+            String email = calendlyAction.EventPrimaryPublisherEmail__c;
+            String conEmail = calendlyAction.InviteeEmail__c;
+            List<User> user = [Select Id From User WHERE Email =: conEmail Limit 1];
+            List<Account> matchingAccounts = new List<Account>();
+            if(spid != null){
+                matchingAccounts = [SELECT Id FROM Account WHERE SPID__c = :spid LIMIT 1];
+            }
+                
+            List<Contact> con = [Select Id From Contact WHERE Email =: email And AccountId =: matchingAccounts[0].Id Limit 1];
+            
+            // Create Event record
+            Event newEvent = new Event();
+            newEvent.Subject = calendlyAction.EventSubject__c;
+            newEvent.StartDateTime = calendlyAction.EventStartTime__c;
+            newEvent.EndDateTime = calendlyAction.EventEndTime__c;
+            newEvent.Description = calendlyAction.EventDescription__c;
+            newEvent.InviteeUuid__c = calendlyAction.InviteeUuid__c;
+            if (spid != null && !matchingAccounts.isEmpty()) {
+                newEvent.WhatId = matchingAccounts[0].Id;
+            }
+            if (!user.isEmpty()) {
+                newEvent.OwnerId = user[0].Id;
+            }
+            if (!con.isEmpty()) {
+                newEvent.WhoId = con[0].Id;
+            }
+            
+            insert newEvent;
+            
+            System.debug('Event created successfully. Event ID: ' + newEvent.Id);
+        } catch (Exception e) {
+            if(createException){
+                SM_CaseDetailWrapper.CommonExceptionWrapper exceWrapObj = SM_Common.createWrapperLogObj('CalendlyActionCalloutQueueable', 'createEventForCalendlyAction', '', e);
+                SM_Common.insertErrorLog(exceWrapObj);
+            }
+        }
+    }
+    private void createTaskForCalendlyAction(String spid) {
+        try {
+            System.debug('API call successful. SPID ID inside task creation: ' + spid);
+            // Query for Account with matching SPID
+            String email = calendlyAction.InviteeEmail__c;
+            String userEmail = calendlyAction.EventPrimaryPublisherEmail__c;
+            List<User> user = [Select Id From User WHERE Email =: userEmail Limit 1];
+            List<Account> matchingAccounts = new List<Account>();
+            if(spid != null){
+                matchingAccounts = [SELECT Id FROM Account WHERE SPID__c = :spid LIMIT 1];
+            }
+            List<Contact> con = [Select Id,AccountId From Contact WHERE Email = :email Limit 1];
+            
+            if (spid != null && !matchingAccounts.isEmpty()) {
+                Id accountId = matchingAccounts[0].Id;
+                
+                // Check for existing retraining cases
+                Integer caseCount = [SELECT COUNT() 
+                                    FROM Case 
+                                    WHERE AccountId = :accountId 
+                                    AND Subject LIKE 'Retraining%' 
+                                    AND Status NOT IN ('Closed', 'Resolved')
+                                    WITH SECURITY_ENFORCED];
+                
+                // Check for existing retraining opportunities
+                Integer oppCount = [SELECT COUNT() 
+                                   FROM Opportunity 
+                                   WHERE AccountId = :accountId 
+                                   AND Products__c = 'Retraining Fee'
+                                   AND StageName = 'Registration Complete' 
+                                   AND Type= 'Additional Fees' 
+                                   WITH SECURITY_ENFORCED];
+                
+                // If there are existing retraining cases or opportunities, don't create a task
+                 System.debug('before case count and opp count ');
+                if (caseCount > 0 || oppCount > 0) {
+                    System.debug('Inside case and opp count ');
+                    return;
+                }
+                
+                Task newTask = new Task();
+                newTask.Subject = calendlyAction.EventSubject__c;
+                newTask.Description = calendlyAction.EventDescription__c;
+                newTask.InviteeUuid__c = calendlyAction.InviteeUuid__c;
+                newTask.WhatId = accountId;
+                
+                if (!user.isEmpty()) {
+                    newTask.OwnerId = user[0].Id;
+                }
+                
+                if (!con.isEmpty() && con[0].AccountId == accountId) {
+                    newTask.WhoId = con[0].Id;
+                }
+                System.debug('Create Task ');
+                insert newTask;
+                System.debug('Created Task Id: ' + newTask.Id);
+            } else {
+                List<Group> queue = [SELECT Id, Name, Type from Group WHERE Type = 'Queue' AND Name = 'Paid Retraining - Invalid Support Code' LIMIT 1];
+                
+                Task newTask = new Task();
+                newTask.Subject = calendlyAction.EventSubject__c;
+                newTask.Description = calendlyAction.EventDescription__c;
+                newTask.InviteeUuid__c = calendlyAction.InviteeUuid__c;
+                
+                if (!queue.isEmpty()) {
+                    newTask.OwnerId = queue[0].Id;
+                }
+                if (!con.isEmpty()) {
+                    newTask.WhoId = con[0].Id;
+                }
+                
+                insert newTask;
+                System.debug('Created Task Id (assigned to queue): ' + newTask.Id);
+            }
+        } catch (Exception e) {
+            System.debug('Not Created Task : ' + e);
+            if(createException){
+                SM_CaseDetailWrapper.CommonExceptionWrapper exceWrapObj = SM_Common.createWrapperLogObj('CalendlyActionCalloutQueueable', 'createTaskForCalendlyAction', '', e);
+                SM_Common.insertErrorLog(exceWrapObj);
+            }
+        }
+    }
+}
