@@ -1,0 +1,10 @@
+trigger CalendlyActionTrigger on CalendlyAction__c (after insert,after update) {
+    // after update part is added for testing
+    CalendlyActionTriggerHandler handler = new CalendlyActionTriggerHandler();
+    
+    if (Trigger.isAfter) {
+        if (Trigger.isInsert|| Trigger.isUpdate) {
+            handler.handleAfterInsert(Trigger.new);
+        } 
+    }
+}
