@@ -1,0 +1,427 @@
+<template>
+    <div class="tabContainer slds-is-relative">
+        <!-- Input Search with Filter Button Block ends here -->
+
+        <div class="inputSearchContaner slds-grid">
+            <div class="searchInput_Block slds-size_6-of-7">
+                <c-abv-bap-search place-holder="Search Professional by Name, ACN & NPI" search-param={searchParam}
+                    oninput={executeSearchAndFilter} onstatus={executeStatusFilter} oncheckbox={executeRepFilter}>
+                </c-abv-bap-search>
+            </div>
+        
+        </div>
+        
+        <!-- Filters applied block ends Here-->
+
+        <lightning-spinner if:true={showSpinner} variant="brand" size="small"
+            alternative-text="Loading Data"></lightning-spinner>
+        <c-ui-tabs options={tabs} selected={selectedtab} ontabselect={updateSelectedTab} class="uiTabsContainer">
+            <!-- Table in Body Block starts Here-->
+            <div if:true={tabselects.all}>
+                <div class="rx_tableBlock bap_tableBlock slds-is-relative">
+                    <lightning-spinner if:true={showSpinner} alternative-text="Loading" variant="brand" size="small">
+                    </lightning-spinner>
+                    <table style="min-width: 1299px;">
+                        <thead class="rx_tableHeaderElement">
+                            <tr>
+                                <th style="width: 9%;" class="rx_tableHeader bapTableHeader cursorPointer"
+                                    data-id="Status_abv__c" data-image-class="statusImageArrow" onclick={sort}>
+                                    <span class="rx_HeaderTag">
+                                        Professional
+                                    </span>
+                                    <img src={ic_sort} alt="arrow_down" class="arrowDropDown statusImageArrow">
+                                </th>
+                                <th style="width: 91%;" class="bapTableHeader">
+                                    <table>
+                                        <tr>
+                                            <th style="width: 18%" class="rx_tableHeader">
+                                                <span class="rx_HeaderTag">
+                                                    Address
+                                                </span>
+                                            </th>
+                                            <th style="width: 8.7%;" class="rx_tableHeader">
+                                                <span class="rx_HeaderTag">Territory</span>
+                                            </th>
+                                            <th style="width: 13.8%;text-align: center;" class="rx_tableHeader">
+                                                <span class="rx_HeaderTag">
+                                                    Address Source
+                                                </span>
+                                            </th>
+                                            <th style="width: 8.7%; text-align: center;" class="rx_tableHeader">
+                                                <span class="rx_HeaderTag">
+                                                    <!-- {s2value} vs {s1value} Match Status -->
+                                                    Previous Quarter Address
+                                                </span>
+                                            </th>
+                                            <th style="width: 7.69%; text-align: center;" class="rx_tableHeader">
+                                                <span class="rx_HeaderTag">
+                                                    {s1value} 
+                                                </span>
+                                            </th>
+                                            <th style="width: 7.69%; text-align: center;" class="rx_tableHeader">
+                                                <span class="rx_HeaderTag">
+                                                    {s2value}
+                                                </span>
+                                            </th>
+                                            <th style="width: 7.69%; text-align: center;" class="rx_tableHeader">
+                                                <span class="rx_HeaderTag">
+                                                    Status
+                                                </span>
+                                            </th>
+                                            <th style="width: 7.69%; text-align: center; min-width: 95px;"
+                                                class="rx_tableHeader">
+                                                <span class="rx_HeaderTag">
+                                                    Decision
+                                                </span>
+                                            </th>
+                                            <template if:false={isUserHomeOffice}>
+                                                <th style="width: 13.19%;text-align: center; min-width: 280px;"
+                                                    class="rx_tableHeader">
+                                                    <span class="rx_HeaderTag">
+                                                        Your Vote
+                                                    </span>
+                                                </th>
+                                            </template>
+                                            <th style="width: 6.59%;" class="rx_tableHeader"></th>
+                                        </tr>
+                                    </table>
+                                </th>
+                            </tr>
+                        </thead>
+
+                        <tbody class="rx_tableBodyElemet">
+                            <template for:each={bapAddressData} for:item="req" for:index="index">
+                                <tr key={req.accountName} class="tableMainbody_tr">
+                                    <td class="rx_tableBody" style="width: 9%;">
+                                        <p class="professionalName"><a href={req.accWrapper.recordUrl} target="__blank">
+                                                {req.accWrapper.accountName}</a></p>
+                                        <p class="otherTextFields">Speciality:{req.accWrapper.speciality}
+                                        </p>
+                                        <p class="requestFields">ACN: <span>
+                                                {req.accWrapper.customerNumber}</span>
+                                        </p>
+                                        <p class="requestFields">NPI: <span>
+                                                {req.accWrapper.npiNumber}</span>
+                                        </p>
+                                        
+                                    </td>
+                                    <td style="width: 91%;">
+                                        <table>
+                                            <template for:each={req.bapList} for:item="mapval" for:index="index1">
+                                                <tr key={req.key} class="nested_table_tr">
+                                                    <td class="rx_tableBody" style="width: 18%">
+                                                        <p class="otherTextFields">{mapval.BAP_Address_Line_1_abv__c}
+                                                        </p>
+                                                        <p class="otherTextFields">
+                                                            <span>{mapval.BAP_City_abv__c}</span>,&nbsp;<span>{mapval.BAP_State_abv__c}</span>&nbsp;-&nbsp;<span>{mapval.BAP_Zip_abv__c}</span>
+                                                        </p>
+                                                    </td>
+                                                    <td class="rx_tableBody" style="width: 8.7%;">
+                                                        <p class="otherTextFields">{mapval.BAP_Territory_Name_abv__c}
+                                                        </p>
+                                                    </td>
+                                                    <td class="rx_tableBody" style="width: 13.8%;">
+                                                        <p class="otherTextFields textCenter">
+                                                            {mapval.BAP_Address_Source_abv__c}
+                                                        </p>
+                                                    </td>
+                                                    <td class="rx_tableBody" style="width: 8.7%;">
+                                                        <p class="otherTextFields textCenter"
+                                                            style="text-transform: uppercase;">
+                                                            {mapval.Matching_Status_abv__c}
+                                                        </p>
+                                                        
+                                                    </td>
+                                                    <td class="rx_tableBody" style="width: 7.69%;">
+                                                        <div class="centerAlignContent">
+                                                            <span
+                                                                class="otherTextFields">{mapval.IC_Apportion_Percentage_abv__c}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td class="rx_tableBody" style="width: 7.69%;">
+                                                        <div class="centerAlignContent">
+                                                            <span
+                                                                class="otherTextFields">{mapval.BAP_Apportion_Percentage_abv__c}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td class="rx_tableBody" style="width: 7.69%;">
+                                                        <div class="centerAlignContent statusBlock">
+                                                            <template if:true={mapval.Matching_Status_abv__c}>
+                                                                <div class="slds-m-vertical_medium statusMessageWrapper"
+                                                                    style="font-size: 12px;">
+                                                                    <img class="statusImage" src={ic_noaction}>
+                                                                    <span>No Action</span>
+
+                                                                </div>
+                                                            </template>
+                                                            <template if:false={mapval.Matching_Status_abv__c}>
+                                                                <div
+                                                                    class="slds-m-vertical_medium statusMessageWrapper">
+                                                                    <img class="statusImage" src={mapval.statusIcon}>
+                                                                    <span
+                                                                        class={mapval.statusClass}>{mapval.iREP_Status_abv__c}</span>
+                                                                </div>
+                                                            </template>
+
+                                                        </div>
+                                                    </td>
+                                                    <td class="rx_tableBody" style="width: 7.69%; min-width: 95px;">
+                                                        <div class="decisionContent">
+
+                                                            <template if:false={mapval.Matching_Status_abv__c}>
+
+                                                                <span
+                                                                    class="greenDecision">{mapval.approvedVotes}</span>
+                                                                <span class="redDecision">{mapval.rejectedVotes}</span>
+                                                            </template>
+                                                        </div>
+                                                    </td>
+                                                    <template if:false={isUserHomeOffice}>
+                                                        <td class="rx_tableBody" style="min-width: 280px;">
+                                                            <template if:false={mapval.isRDUserValidation}>
+                                                            <template if:false={mapval.isUserVoteSubmitted}>
+                                                                <template if:false={mapval.Matching_Status_abv__c}>
+                                                                    <div class="yourVoteButtons">
+                                                                        <button onclick={userVoteConfirmationHandler}
+                                                                            data-id={mapval.Id} data-index={index}
+                                                                            data-button-name="Approve"
+                                                                            class="btn btn-default approvedButtons"
+                                                                            style="margin-right: 10px;">
+                                                                            <span>Approve</span>
+                                                                        </button>
+                                                                        <button onclick={userVoteConfirmationHandler}
+                                                                            data-id={mapval.Id} data-index={index}
+                                                                            data-button-name="Deny"
+                                                                            class="btn btn-default submitButtons "
+                                                                            style="margin-right: 10px;">
+                                                                            <span>Deny</span>
+                                                                        </button>
+                                                                        <!-- Added reset button func -->
+                                                                        <button onclick={resetVoteHandler}
+                                                                            data-id={mapval.Id} data-index={index}
+                                                                           
+                                                                            class="btn btn-default resetButtons ">
+                                                                            <span>Reset</span>
+                                                                        </button>
+                                                                    </div>
+                                                                </template>
+                                                            
+                                                            </template>
+
+                                                            <template if:true={mapval.isUserVoteSubmitted}>
+                                                                <!-- For Rejected, make this below div true -->
+                                                                <div class="yourVoteButtons"
+                                                                    if:false={mapval.isUserSubmittedApprove}>
+                                                                    <div class="rejectedButton">
+                                                                        {mapval.userSubmittedVote}
+                                                                    </div>
+                                                                    
+                                                                    <!-- Commented Edit button for UAT Feedback -->
+                                                                   <!-- <button onclick={showModificationmodal}
+                                                                        class="editButton"
+                                                                        data-current-decision="Rejected"
+                                                                        data-index={index} data-id={mapval.Id} 
+                                                                        style="margin-right: 10px;">
+                                                                        <img src={ic_edit} alt="Edit">
+                                                                    </button> -->
+                                                                    <!-- added reset button -->
+                                                                    <button onclick={resetVoteHandler}
+                                                                            data-id={mapval.Id} data-index={index}
+                                                                           style="margin-left: 10px;"
+                                                                            class="btn btn-default resetButtons ">
+                                                                            <span>Reset</span>
+                                                                        </button>
+                                                                </div>
+
+                                                                <!-- For Approved, make this below div true -->
+                                                                <div class="yourVoteButtons"
+                                                                    if:true={mapval.isUserSubmittedApprove}>
+                                                                    <div class="approvedButton">
+                                                                        {mapval.userSubmittedVote}
+                                                                    </div>
+                                                                    
+                                                                    <!-- Commented Edit button for UAT Feedback -->
+                                                                   <!-- <button onclick={showModificationmodal}
+                                                                        class="editButton"
+                                                                        data-current-decision="Approved"
+                                                                        data-index={index} data-id={mapval.Id}
+                                                                        style="margin-right: 10px;">
+                                                                        <img src={ic_edit} alt="Edit">
+                                                                    </button>-->
+                                                                    <!-- Added reset Button -->
+                                                                    <button onclick={resetVoteHandler}
+                                                                            data-id={mapval.Id} data-index={index}
+                                                                           style="margin-left: 10px;"
+                                                                            class="btn btn-default resetButtons ">
+                                                                            <span>Reset</span>
+                                                                        </button>
+                                                                </div>
+                                                            </template>
+                                                             </template>
+                                                        </td>
+                                                    </template>
+                                                    <td class="optionBtnShow" style="width: 6.59%;">
+                                                        <template if:false={mapval.Matching_Status_abv__c}>
+
+                                                            <div class="optionButtonContainer">
+                                                                <div class="btn optionsBtn" data-prod-id="data-1"
+                                                                    data-index={index}>
+                                                                    <img src={ic_options}>
+                                                                    <ul class="list_Ul">
+                                                                        <li class="list_Li">
+                                                                            <a class="viewDetailsBtn" role="menuitem"
+                                                                                tabindex="0"
+                                                                                onclick={showRequestDetailModal}
+                                                                                data-index={index} data-id={index1}>
+
+                                                                                <span class="slds-truncate"
+                                                                                    title="View Detail">View
+                                                                                    Detail</span>
+
+                                                                            </a>
+                                                                        </li>
+                                                                    </ul>
+                                                                </div>
+                                                            </div>
+                                                        </template>
+                                                    </td>
+                                                </tr>
+                                            </template>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- Table in Body Block Ends Here-->
+            
+        </c-ui-tabs>
+
+        <template if:false={bapAddressData}>
+            <br />
+            <div class="slds-text-heading_small slds-text-align_center slds-text-color_error">No Data Present</div>
+        </template>
+    </div>
+
+    <!-- Modify Decision Modal starts Here -->
+    <c-ui-modal width="42%" class="decisionChange_UiModal" modaltitle="Modify Decision" show={showModifyDecisionmodal}
+        oncancel={closeModificationModal}>
+        <div class="modifyDecisionBody">
+            <lightning-spinner if:true={showVoteSubmissionSpinner} alternative-text="Loading" variant="brand"
+                size="small"></lightning-spinner>
+            <div class="slds-form-element">
+                <template if:true={isCurrentDecisionApproved}>
+                    <label class="slds-form-element__label popUpTextArea textAreaLabel" for="textarea-id-01">Reason for
+                        decision change</label>
+
+                    <lightning-combobox class='denyReasonPicklist' name="progress" label="Denial Reason"
+                        options={denyReasonPicklist} onchange={denyReasonSelector}
+                        message-when-value-missing={noDenialReasonMessage} required>
+                    </lightning-combobox>
+                </template>
+                <template if:false={isCurrentDecisionApproved}>
+                    <p style="font-size: 13px;">Are you sure, you want to mark your vote as 'Approved'?</p>
+                </template>
+            </div>
+        </div>
+        <div slot="actionbuttons" class="modalButtonBlock">
+            <button onclick={closeModificationModal} class="btn btn-default filterButtons" style="margin-right: 10px;">
+                <span>Cancel</span>
+            </button>
+            <button class="btn btn-secondary filterButtons " onclick={confirmVoteChange}>
+                <span>Confirm</span>
+            </button>
+        </div>
+
+    </c-ui-modal>
+
+    <!-- reset button Modal starts-->
+    <c-ui-modal width="42%" class="decisionChange_UiModal" modaltitle="Modify Decision" show={showResetModal}
+        oncancel={closeResetModificationModal}>
+        <div class="modifyDecisionBody">
+            <div class="slds-form-element">
+                <p style="font-size: 13px;">Are you sure, you want to RESET your vote?</p>
+            </div>
+        </div>
+        <div slot="actionbuttons" class="modalButtonBlock">
+            <button onclick={closeResetModificationModal} class="btn btn-default filterButtons" style="margin-right: 10px;">
+                <span>Cancel</span>
+            </button>
+            <button class="btn btn-secondary filterButtons " onclick={resetFuncHandler}>
+                <span>Confirm</span>
+            </button>
+        </div>
+    </c-ui-modal>
+    <!-- reset button modal ends -->
+
+    <!-- Request Details Modal Starts Here -->
+    <c-ui-modal width="80%" class="requestDetails_UiModal" modaltitle="Voting Details" show={showDetailsmodal}
+        oncancel={closeRequestDetailsModal}>
+        <div class="requestDetails_Modal slds-is-relative">
+            <lightning-spinner if:true={requestDetailModalSpinner} variant="brand" size="small"
+                alternative-text="Fetching Data">
+            </lightning-spinner>
+            <div class="modalHeader">Submitter Details</div>
+            <table>
+                <thead class="rx_tableHeaderElement">
+                    <tr>
+                        <th style="width: 10%;" class="rx_tableHeader"><span class="rx_HeaderTag">Name</span></th>
+                        <th style="width: 10%;" class="rx_tableHeader"><span class="rx_HeaderTag">Email</span></th>
+                        <th style="width: 10%;" class="rx_tableHeader"><span class="rx_HeaderTag">Phone</span></th>
+                        <th style="width: 8%;" class="rx_tableHeader"><span class="rx_HeaderTag">Territory</span></th>
+                        <th style="width: 8%;" class="rx_tableHeader"><span class="rx_HeaderTag">User Type</span></th>
+                        <th style="width: 12%;" class="rx_tableHeader"><span class="rx_HeaderTag">Vote Submitter - Role</span></th>
+                        <th style="width: 12%;" class="rx_tableHeader"><span class="rx_HeaderTag">RD Impersonated Vote</span></th>
+                        <th style="width: 10%;" class="rx_tableHeader"><span class="rx_HeaderTag">Voting Status</span>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="rx_tableBodyElemet">
+                    <template for:each={votingDetailsData} for:item="fromData"
+                        for:index="modalIndex">
+                        <tr key={fromData.Id}>
+                            <td class="rx_tableBody">
+                                <p class="otherTextFields"> {fromData.Vote_Submitter_abv__r.Name}</p>
+                            </td>
+
+                            <td class="rx_tableBody">
+                                <p class="otherTextFields">{fromData.Vote_Submitter_abv__r.Email}</p>
+                            </td>
+                            <td class="rx_tableBody">
+                                <p class="otherTextFields">{fromData.Vote_Submitter_abv__r.Phone}</p>
+                            </td>
+                            <td class="rx_tableBody">
+                                <p class="otherTextFields">{fromData.Vote_Submitter_abv__r.Primary_Territory_vod__c}</p>
+                            </td>
+                            <td class="rx_tableBody">
+                                <p class="otherTextFields">{fromData.User_Category_abv__c}</p>
+                            </td>
+                            <td class="rx_tableBody">
+                                <p class="otherTextFields">{fromData.CreatedBy.Name} - {fromData.User_Type_abv__c}</p>
+                            </td>
+                            <td class="rx_tableBody">
+                                <p class="otherTextFields">{fromData.RD_Impersonate_as_Proxy_DM_abv__c}</p>
+                            </td>
+                            <td class="rx_tableBody">
+                                <div class="yourVoteButtons_modal">
+                                    <div class={fromData.voteClass}>{fromData.vote}</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+            <br />
+        </div>
+        <div slot="actionbuttons" class="modalButtonBlock">
+            <button onclick={closeRequestDetailsModal} class="btn btn-secondary filterButtons ">
+                <span>Close</span>
+            </button>
+        </div>
+    </c-ui-modal>
+
+    <!-- Request Details Modal Ends Here -->
+
+</template>
