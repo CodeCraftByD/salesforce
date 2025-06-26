@@ -1,0 +1,85 @@
+.THIS .notesClass {
+	width: 30rem;
+}
+.THIS .hide {
+    display:none;
+}
+.THIS .errorMessage {
+    color: #464646;
+    background-color: #fdedea;
+    border: 1px solid #f2a199;
+    position: relative;
+    padding: .75rem 1.25rem;
+    border-radius: .25rem;
+}
+.THIS .contractNumberInput .slds-input, .THIS .softwareCoordinatorInput .slds-input, .THIS .resellerAccountInput .slds-input, .THIS .SoldToAccountInput .slds-input {
+    width: 10rem;
+}
+.THIS .assetCountInput .slds-input {
+    width: 4rem;
+}
+.THIS .newContractNumber, .THIS .newSCName {
+    display: inline-block;
+}
+.THIS .softwareCoordinatorInput .slds-input:not(.hide), .THIS .contractNumberInput .slds-input:not(.hide), .THIS .resellerAccountInput .slds-input:not(.hide), .THIS .SoldToAccountInput .slds-input:not(.hide) {
+    margin-right: 0.1rem;
+}
+.THIS .contractNumberInput .slds-input, .THIS .softwareCoordinatorInput .slds-input, .THIS .assetCountInput .slds-input, .THIS .resellerAccountInput .slds-input, .THIS .SoldToAccountInput .slds-input {
+	line-height: 1.475rem;
+    min-height: 1.475rem;
+}
+.THIS td.contractNumberInput, .THIS td.softwareCoordinatorInput,  .THIS td.resellerAccountInput, .THIS td.SoldToAccountInput {
+    padding-top: .3rem;
+    padding-bottom: .3rem;
+}
+.THIS .softwareCoordinatorInput .lookup, .THIS .contractNumberInput .lookup, .THIS .resellerAccountInput .lookup, .THIS .SoldToAccountInput .lookup{
+    cursor: pointer;
+}
+.THIS .activeButton, .THIS .activeButton:focus, .THIS .activeButton:hover {
+	cursor: not-allowed;
+    background-color: rgb(0, 95, 178);
+    border-color: rgb(0, 95, 178);
+    color: rgb(255, 255, 255);
+    box-shadow: none; 
+}
+.THIS .slds-spinner {
+    top: 25%;
+}
+.THIS .softwareCoordinatorInput input:disabled, .THIS .contractNumberInput input:disabled, .THIS .resellerAccountInput input:disabled, .THIS .SoldToAccountInput input:disabled {
+    background-color: rgb(255, 255, 255);
+    border: 1px solid rgb(217, 219, 221);
+}
+.THIS .tableContainer {
+    clear:both;
+}
+.THIS .containerMargin {
+    padding: 10px;
+}
+.THIS .slds-table_bordered {
+    border-top: 2px solid rgb(217, 219, 221) !important;
+}
+.THIS .spinnerMessage {
+    transform: rotate(270deg);
+    position: absolute;
+    top: -15px;
+    left: -250px;
+    text-align: center;
+    min-width: 40rem;
+    font-weight: bold;
+}
+.THIS .cmInfo {
+    margin-top:0.3rem;
+}
+.THIS .transactionSuccessfulContent, .THIS .transactionTakingLongContent {
+    font-weight: bold;
+}
+.THIS .failedTransactionList { 
+    margin-left: 1rem;
+}
+.THIS .successfulTransactionList { 
+    margin-top: 0.5rem
+}
+.THIS .componentContainer {
+    position: relative;
+    min-height: 100vh;
+}
