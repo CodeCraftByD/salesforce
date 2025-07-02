@@ -1,0 +1,26 @@
+<template>
+  <!--Search Bar & Filter Button - MOBILE-->
+  <template if:true={isMobile}>
+    <lightning-layout horizontal-align="spread" vertical-align="center">
+      <lightning-layout-item flexibility="grow">
+        <lightning-input name="enter-search" type="search" value={searchTerm} onchange={searchTermChangeHandler} placeholder={label.PlaceholderMobileLabel}>
+        </lightning-input>
+      </lightning-layout-item>
+      <!-- <lightning-layout-item>
+        <lightning-button-icon icon-name="utility:filterList" variant="bare" alternative-text="Filter" size="large" class="slds-m-left_x-small" onclick={filterClickedHandler}></lightning-button-icon>
+      </lightning-layout-item> -->
+    </lightning-layout>
+  </template>
+
+  <!--DESKTOP-->
+  <template if:false={isMobile}>
+    <lightning-layout horizontal-align="spread" vertical-align="center">
+      <lightning-layout-item flexibility="grow">
+        <lightning-input name="enter-search" type="search" value={searchTerm} onchange={searchTermChangeHandler} placeholder={label.PlaceholderLabel}> </lightning-input>
+      </lightning-layout-item>
+      <!-- <lightning-layout-item>
+        <lightning-button-icon icon-name="utility:filterList" variant="bare" alternative-text="Filter" size="large" class="slds-m-left_x-small" onclick={filterClickedHandler}></lightning-button-icon>
+      </lightning-layout-item> -->
+    </lightning-layout>
+  </template>
+</template>
