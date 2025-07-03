@@ -17,6 +17,12 @@ import yourRequestWasSentLabel from '@salesforce/label/c.mentor_your_request_was
 import declineLabel from '@salesforce/label/c.Decline';
 import acceptLabel from '@salesforce/label/c.Accept';
 import tellUsALittleMoreThisHelpsLabel from '@salesforce/label/c.mentor_Please_tell_us_a_little_more_This_helps_us_improve_our_algorithm';
+import search_EXISTING_RELATIONSHIP_Accepted from "@salesforce/label/c.Search_EXISTING_RELATIONSHIP_Accepted";//change
+import search_EXISTING_RELATIONSHIP_Rejected	 from "@salesforce/label/c.Search_EXISTING_RELATIONSHIP_Rejected";//change
+import search_EXISTING_RELATIONSHIP_Request	 from "@salesforce/label/c.Search_EXISTING_RELATIONSHIP_Request";//change
+import search_MENTEE_ONLY from "@salesforce/label/c.Search_MENTEE_ONLY";//change
+import search_NO_CAPACITY from "@salesforce/label/c.Search_NO_CAPACITY";//change
+import search_Already_in_Relationship from "@salesforce/label/c.Search_Already_in_Relationship";//change
 import whyAreYouNotInterestedLabel from '@salesforce/label/c.mentor_Why_are_you_not_interested_in_this_person_as_a_mentor';
 import pleaseTellUsMoreLabel from '@salesforce/label/c.mentor_Please_tell_us_more';
 import anyAdditionalInformationLabel from '@salesforce/label/c.mentor_Any_additional_information_is_appreciated';
@@ -62,7 +68,13 @@ export default class MentorRequestButtons extends NavigationMixin(LightningEleme
     declineMenteeLabel,
     sendRequestLabel,
     notInterestedLabel,
-    removeSuggestionLabel
+    removeSuggestionLabel,
+    search_EXISTING_RELATIONSHIP_Accepted,//change
+    search_EXISTING_RELATIONSHIP_Rejected,//change
+    search_EXISTING_RELATIONSHIP_Request,//change
+    search_MENTEE_ONLY,//change
+    search_NO_CAPACITY,//change
+    search_Already_in_Relationship//change
   }
 
   @wire(getPicklistValues, {
@@ -106,38 +118,38 @@ export default class MentorRequestButtons extends NavigationMixin(LightningEleme
   toggleDismissModal() {
     //this.showDismissModal = !this.showDismissModal;
     console.log('Calling from here?')
-    this.callModal('medium','','',false,'','Please tell us a little more. This helps us improve our algorithm.','','Cancel',this.labels.removeSuggestionLabel)
+    this.callModal('medium', '', '', false, '', 'Please tell us a little more. This helps us improve our algorithm.', '', 'Cancel', this.labels.removeSuggestionLabel)
   }
 
-  callModal(size, description, content, hideFooter, inputLabel, heading, buttonLabel, cancelLabel, saveLabel){
+  callModal(size, description, content, hideFooter, inputLabel, heading, buttonLabel, cancelLabel, saveLabel) {
     MyModal.open({
       size: size,
       description: description,
       content: content,
       hideFooter: hideFooter,
-      inputLabel : inputLabel,
-      heading :heading,
+      inputLabel: inputLabel,
+      heading: heading,
       buttonLabel: buttonLabel,
-      showDismissModal:true,
-      cancelLabel:cancelLabel,
-      saveLabel:saveLabel,
-      reasonvalues:this.reasonPlValues,
-     onprimaryevent: (e) => {
+      showDismissModal: true,
+      cancelLabel: cancelLabel,
+      saveLabel: saveLabel,
+      reasonvalues: this.reasonPlValues,
+      onprimaryevent: (e) => {
         // stop further propagation of the event
-        e.stopPropagation();        
+        e.stopPropagation();
         this.dismissSuggestion();
-      },  
-      onreasonchange:(e)=>{
-        e.stopPropagation();  
+      },
+      onreasonchange: (e) => {
+        e.stopPropagation();
         this.handleReasonChange(e);
       },
-      oninformationchange:(e)=>{
-        e.stopPropagation();  
+      oninformationchange: (e) => {
+        e.stopPropagation();
         this.handleDismissalInformationChange(e);
-      } 
-  }).then((result) => {
-    console.log(result);
-  });
+      }
+    }).then((result) => {
+      console.log(result);
+    });
   }
   async toggleComposer() {
     MyModal.open({
@@ -145,42 +157,42 @@ export default class MentorRequestButtons extends NavigationMixin(LightningEleme
       description: 'Accessible description of modal\'s purpose',
       content: 'Passed into content api',
       hideFooter: false,
-      inputLabel : this.labels.writeSomethingAboutYourselfLabel,
-      heading : this.labels.mentorRequestLabel,
+      inputLabel: this.labels.writeSomethingAboutYourselfLabel,
+      heading: this.labels.mentorRequestLabel,
       buttonLabel: this.labels.sendRequestLabel,
-      showMessageComposer:true,
-      saveLabel:'Send Request',
-    onprimaryevent: (e) => {
+      showMessageComposer: true,
+      saveLabel: 'Send Request',
+      onprimaryevent: (e) => {
         // stop further propagation of the event
-        console.log('getting message?'+JSON.stringify(e.detail.message))
-        e.stopPropagation();        
+        console.log('getting message?' + JSON.stringify(e.detail.message))
+        e.stopPropagation();
         this.sendRequest(e.detail.message);
       }
-  }).then((result) => {
-    console.log(result);
-  });
+    }).then((result) => {
+      console.log(result);
+    });
   }
 
 
   toggleAcceptComposer() {
-   MyModal.open({
-    size: 'small',
-    description: 'Accessible description of modal\'s purpose',
-    content: 'Passed into content api',
-    hideFooter: false,
-    inputLabel : this.labels.youCanAddAPersonalizedMessageLabel,
-    heading : this.labels.acceptMenteeLabel,
-    buttonLabel: this.labels.acceptLabel,
-    showMessageComposer:true,
-    saveLabel:'Accept',
-  onprimaryevent: (e) => {
-      // stop further propagation of the event
-      e.stopPropagation();        
-      this.acceptMentee(e.detail.message);
-    }
-}).then((result) => {
-  console.log(result);
-});
+    MyModal.open({
+      size: 'small',
+      description: 'Accessible description of modal\'s purpose',
+      content: 'Passed into content api',
+      hideFooter: false,
+      inputLabel: this.labels.youCanAddAPersonalizedMessageLabel,
+      heading: this.labels.acceptMenteeLabel,
+      buttonLabel: this.labels.acceptLabel,
+      showMessageComposer: true,
+      saveLabel: 'Accept',
+      onprimaryevent: (e) => {
+        // stop further propagation of the event
+        e.stopPropagation();
+        this.acceptMentee(e.detail.message);
+      }
+    }).then((result) => {
+      console.log(result);
+    });
   }
 
   toggleRejectComposer() {
@@ -189,26 +201,31 @@ export default class MentorRequestButtons extends NavigationMixin(LightningEleme
       description: 'Accessible description of modal\'s purpose',
       content: 'Passed into content api',
       hideFooter: false,
-      inputLabel : this.labels.youCanAddAPersonalizedMessageLabel,
-      heading : this.labels.declineMenteeLabel,
+      inputLabel: this.labels.youCanAddAPersonalizedMessageLabel,
+      heading: this.labels.declineMenteeLabel,
       buttonLabel: this.labels.declineLabel,
-      showMessageComposer:true,
-      saveLabel:'Decline',
-    onprimaryevent: (e) => {
+      showMessageComposer: true,
+      saveLabel: 'Decline',
+      onprimaryevent: (e) => {
         // stop further propagation of the event
-        e.stopPropagation();        
+        e.stopPropagation();
         this.rejectMentee(e.detail.message);
       }
-  }).then((result) => {
-    console.log(result);
-  });
-  }  
+    }).then((result) => {
+      console.log(result);
+    });
+  }
 
   requestClickedHandler() {
+    if (this.isButtonDisabled) {//change
+      return;//change
+    }//change
+
     if (this.mode === "mentor") {
       // If user logged in as mentor accept mentee
       this.toggleAcceptComposer();
     } else {
+      console.log('user :', JSON.stringify(this.user));
       // If user logged in as mentee send request to mentor
       if (this.userAvailable) {
         this.toggleComposer();
@@ -224,13 +241,13 @@ export default class MentorRequestButtons extends NavigationMixin(LightningEleme
     console.log('Am i here?')
     this.loading = true;
     try {
-      console.log('last step'+message)
-;      await createMentoringMatch({
-        mentorId: this.userId,
-        status: "Requested",
-        requestMessage: message,
-        score: this.score,
-      });
+      console.log('last step' + message)
+        ; await createMentoringMatch({
+          mentorId: this.userId,
+          status: "Requested",
+          requestMessage: message,
+          score: this.score,
+        });
       // Show success notification
       this.showNotification('Success!!', yourRequestWasSentLabel, "success");
       // Stop spinner
@@ -388,7 +405,7 @@ export default class MentorRequestButtons extends NavigationMixin(LightningEleme
   // GETTERS
   get meetingUrl() {
     const guestEmail = this.user ? this.user.Email : undefined;
-   let startDate = new Date();
+    let startDate = new Date();
     startDate.setHours(startDate.getHours() + 1, 0, 0, 0);
     startDate = startDate.toISOString().replace(/-|:|\.\d\d\d/g, "");
     let endDate = new Date();
@@ -441,7 +458,35 @@ export default class MentorRequestButtons extends NavigationMixin(LightningEleme
     return screen.width <= 768;
   }
 
-  get requestButtonClasses() {
-    return "oversized-button oversized-button-brand slds-text-color_inverse slds-align_absolute-center  requestbutton";
+  get requestButtonClasses() {//change start
+    return this.isButtonDisabled
+      ? "oversized-button oversized-button-disabled slds-text-color_inverse slds-align_absolute-center requestbutton"
+      : "oversized-button oversized-button-brand slds-text-color_inverse slds-align_absolute-center requestbutton";
   }
+
+  get isButtonDisabled() {
+    return (this.user && this.user.isFiltered) || !this.userAvailable;
+  }
+
+  get errorMessage() {
+    if (!this.user || !this.user.isFiltered) return '';
+
+    switch (this.user.filterReason) {
+      case 'MENTEE_ONLY':
+        return this.labels.search_MENTEE_ONLY;
+      case 'NO_CAPACITY':
+        return this.labels.search_NO_CAPACITY;
+      case 'EXISTING_RELATIONSHIP':
+        if (this.user.relationshipStatus === 'Requested') {
+          return this.labels.search_EXISTING_RELATIONSHIP_Request;
+        } else if (this.user.relationshipStatus === 'Accepted') {
+          return this.labels.search_EXISTING_RELATIONSHIP_Accepted;
+        } else if (this.user.relationshipStatus === 'Rejected') {
+            return this.labels.search_EXISTING_RELATIONSHIP_Rejected;
+        }
+        return this.labels.search_Already_in_Relationship;
+      default:
+        return 'This mentor is not available for requests at this time.';
+    }
+  }//change end
 }
