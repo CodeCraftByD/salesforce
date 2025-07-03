@@ -13,8 +13,72 @@
   background-color: #006BC8;
   border: 2px solid transparent;
 }
-
-.oversized-button-disabled {
+/* change start */
+/* .oversized-button-disabled {
   background-color: #c7c5c3;
   border: 2px solid transparent;
+} */
+
+.oversized-button-disabled {
+  background-color: #c9c7c5 !important;
+  cursor: not-allowed;
+  border: 2px solid transparent;
+  pointer-events: auto !important; /* Allow hover events while disabling clicks */
 }
+
+.tooltip-container {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  width: 300px; /* Increased width */
+  background-color: #16325c;
+  color: #fff;
+  text-align: left;
+  padding: 12px;
+  padding-left: 12px;
+  border-radius: 6px;
+  position: absolute;
+  z-index: 9999; /* Higher z-index to ensure it appears above other elements */
+  bottom: 150%; /* Increased distance from button */
+  left: 50%;
+  transform: translateX(-50%); /* Center the tooltip */
+  opacity: 0;
+  transition: opacity 0.3s;
+  font-size: 12px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  overflow: visible; /* Ensure content doesn't get cut */
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.16);
+}
+
+/* Tooltip arrow */
+.tooltip-text::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -8px;
+  border-width: 8px;
+  border-style: solid;
+  border-color: #16325c transparent transparent transparent;
+}
+
+/* Show the tooltip when hovering over the container */
+.tooltip-container:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* For mobile devices - make tooltip wider */
+@media only screen and (max-width: 768px) {
+  .tooltip-text {
+    width: 280px;
+    left: 0;
+    transform: translateX(-20%); /* Adjust position for mobile */
+  }
+}
+/* change end */
