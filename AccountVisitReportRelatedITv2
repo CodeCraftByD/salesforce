@@ -1,0 +1,645 @@
+/*
+ * Description : Custom Controller for Account Visit Report Related V2 Visualforce page
+ * Created by : Ismet Tinjic
+ * Date : Sep-2020
+ */
+public class AccountVisitReportRelatedITv2  {
+
+    public String getRecords() {
+        return null;
+    }
+
+    public String getAcc() {
+        return null;
+    }
+
+    public AccountActivityCustomIT getResultsCustom() {
+    	return null;
+    }
+    
+     public List<AccountActivityCustomIT> getcustomType() {
+        return customType;
+    }
+ 
+
+        Transient public   List<Site_Visit__c> visitReports{get;set;}
+        Transient public   List<Event> events{get;set;}
+        Transient public   List<EmailMessage> emails{get;set;}
+        Transient public   List<Task> tasks{get;set;}
+   	/*	public   List<Note> notes{get;set;}
+     	public   List<Attachment> attachments{get;set;}
+        public   List<Account> accounts{get;set;}*/
+    
+    	//Filter Value
+    	public Boolean emailFilterFlag;
+    	public Boolean visitReportFilterFlag;
+    	public Boolean eventFilterFlag;
+    	public Boolean taskFilterFlag;
+    	public string filteringText = 'Enter your text';
+    	public string filterText {get;set;}
+
+      public List<AccountActivityCustomIT> customType = new List<AccountActivityCustomIT>();
+
+        public AccountVisitReportRelatedITv2(){
+            //filterText = 'Test';
+            this.setFlagOnTrue();
+            if(!String.isEmpty(ApexPages.CurrentPage().getParameters().get('id'))){        
+                this.getAllData(ApexPages.CurrentPage().getParameters().get('id'));
+            }
+        }
+    
+    public void setFlagOnTrue(){
+        emailFilterFlag = true;
+    	visitReportFilterFlag = true;
+    	eventFilterFlag = true;
+    	taskFilterFlag = true;
+    }
+    
+    public Boolean getAllData(string id){
+            visitReports=[SELECT id,Name,Objectives__c,Type_Of_Meeting__c,Actions__c,CreatedById,RSM__r.FirstName,RSM__r.LastName,Report_Date__c,Sales_Team__c,Customer_Attendees__c,Huber_Attendees__c,Visit_Report__c,Type__c,Status__c,Primary_Contact__r.Email FROM Site_Visit__c Where Account__c=:id order by Report_Date__c desc LIMIT 45];
+		    events = [SELECT id,WhoId,Who.Name,WhatId,OwnerId, Description,CreatedBy.Email, CreatedById,CreatedBy.FirstName,CreatedBy.LastName, StartDateTime,Type,Subject,ActivityDateTime FROM Event WHERE ((WhatId =:id) OR  (Additional_Account__c=:id) ) LIMIT 45];                    
+            emails = [SELECT id,HtmlBody,Subject,TextBody,ToAddress,CreatedById,CreatedBy.Email,CreatedBy.FirstName,CreatedBy.LastName,FromAddress,RelatedToId, Status,CreatedDate FROM EmailMessage  WHERE (RelatedToId =:id AND  CreatedDate >= LAST_N_YEARS:3) order by CreatedDate desc LIMIT 45]; 
+            //tasks = [SELECT id,Who.Name,CreatedBy.Email,CreatedById,CreatedBy.FirstName,CreatedBy.LastName,Description,WhoId,Subject,ActivityDate,Type FROM Task  WHERE ((WhatId =:id) OR  (Additional_Account__c=:id) ) LIMIT 45];
+ 			tasks = [SELECT id,Who.Name,CreatedBy.Email,CreatedById,CreatedBy.FirstName,CreatedBy.LastName,Description,WhoId,Subject,ActivityDate,Type,CreatedDate FROM Task  WHERE (((WhatId =:id) OR  (Additional_Account__c=:id)) AND  (NOT Subject  like '%Email%') )  order by CreatedDate desc LIMIT 45];
+
+       
+    /*    	visitReports=[SELECT id,Name,Objectives__c,CreatedById,RSM__r.FirstName,RSM__r.LastName,Report_Date__c,Sales_Team__c,Customer_Attendees__c,Visit_Report__c,Type__c,Status__c,Primary_Contact__r.Email FROM Site_Visit__c  order by Report_Date__c desc LIMIT 100];
+		    events = [SELECT id,WhoId,Who.Name,WhatId,OwnerId, Description,CreatedBy.Email, CreatedById,CreatedBy.FirstName,CreatedBy.LastName, StartDateTime,Type,Subject,ActivityDateTime FROM Event  LIMIT 100];                    
+            emails = [SELECT id,HtmlBody,Subject,TextBody,ToAddress,CreatedById,CreatedBy.Email,CreatedBy.FirstName,CreatedBy.LastName,FromAddress,RelatedToId, Status,CreatedDate FROM EmailMessage   order by CreatedDate desc LIMIT 100]; 
+            tasks = [SELECT id,Who.Name,CreatedBy.Email,CreatedById,CreatedBy.FirstName,CreatedBy.LastName,Description,WhoId,Subject,ActivityDate,Type FROM Task   LIMIT 100];
+*/
+          
+            //CALL HELPER METHODS
+            this.GetEmailData(emails);
+            this.GetEventData(events);
+            this.GetTaskData(tasks);
+            this.GetVisitReportData(visitReports);
+            this.CustomSortingMethodbyIT(this.customType);
+
+        return true;
+    }
+    
+
+
+    public Boolean TestingPrivateFunction2(){
+         visitReports=[SELECT id,Name,Objectives__c,Type_Of_Meeting__c,Actions__c,CreatedById,RSM__r.FirstName,RSM__r.LastName,Report_Date__c,Sales_Team__c,Customer_Attendees__c,Huber_Attendees__c,Visit_Report__c,Type__c,Status__c FROM Site_Visit__c Where Account__c='0011U00001GjfCQQAZ' order by Report_Date__c desc];
+		 this.GetVisitReportData(visitReports);
+         this.CustomSortingMethodbyIT(this.customType);
+         return true;
+    }
+
+    
+    
+    // HELPER FUNCTIONS **********************************************
+ 
+    // GET VISITREPORT *****************************************************************************
+       public string  GetVisitReportData(List<Site_Visit__c> visitReports) {
+        	for (Site_Visit__c visitReport : visitReports){
+                     AccountActivityCustomIT resultsCustom = new AccountActivityCustomIT();
+                 	 resultsCustom.customTypeName = 'Visit Report';
+                     resultsCustom.recordIDLabel = visitReport.Name;
+                     resultsCustom.RecordName = visitReport.Objectives__c;
+                     resultsCustom.recordID = visitReport.id;
+                	 resultsCustom.RecordDate = visitReport.Report_Date__c;
+                     resultsCustom.SalesTeam = visitReport.Sales_Team__c;
+                    resultsCustom.RecordCreatedByName = visitReport.RSM__r.FirstName+' '+visitReport.RSM__r.LastName;                
+                	 resultsCustom.RecordCreatedBy = visitReport.CreatedById;
+          	  		resultsCustom.CustomerAttendees = visitReport.Customer_Attendees__c;
+          	  		resultsCustom.HuberAttendees = visitReport.Huber_Attendees__c;
+                resultsCustom.TypeOfMeeting = visitReport.Type_Of_Meeting__c;
+                resultsCustom.MeetingVenue = visitReport.Type__c;
+                resultsCustom.Summary = visitReport.Objectives__c;
+                 resultsCustom.Actions = visitReport.Actions__c;
+                  resultsCustom.WrittenBy = visitReport.RSM__c;
+          	  		 resultsCustom.ContactField = visitReport.Primary_Contact__r.Email;
+                 system.debug('--before--'+visitReport.Visit_Report__c);
+               		 //string BodyDet = this.ParsStingBody(visitReport.Visit_Report__c); 
+               		 string BodyDet = visitReport.Visit_Report__c != null ? visitReport.Visit_Report__c : '' ; 
+                     system.debug('----'+visitReport.Visit_Report__c);
+                     system.debug('----'+BodyDet);
+                	 String parsedValueWithoutHtmlTags = BodyDet;
+					 parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('<[/a-zAZ0-9]*>','');
+                	 parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('<[^>]+>', '');
+					 parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&#39;','\'');  
+                	 parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&amp;','&');
+ 					 parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('</p',''); 
+                     parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&gt;','>');
+                     parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&lt;','<');
+                     parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&quot;','"');  
+                system.debug('----'+parsedValueWithoutHtmlTags);
+                	 resultsCustom.BodyDetails = parsedValueWithoutHtmlTags;        
+                	 customType.add(resultsCustom);   
+                
+           		 }    
+           return 'Test';
+ 	 	}
+     // END OF GET VISITREPORT *****************************************************************************
+     // ****
+     // ***
+     // **
+     // GET EMAIL VALUE
+        private void  GetEmailData(List<EmailMessage> emailList) {
+        	for (EmailMessage emailDetail : emailList){
+                     AccountActivityCustomIT resultsCustom = new AccountActivityCustomIT();
+                 	 resultsCustom.customTypeName = 'Email';
+                     resultsCustom.RecordName = emailDetail.Subject;
+                     resultsCustom.recordID = emailDetail.id;
+                	  resultsCustom.recordIDLabel = emailDetail.Subject;              
+                	 Date emailDate = date.newinstance(emailDetail.CreatedDate.year(), emailDetail.CreatedDate.month(), emailDetail.CreatedDate.day());
+                     resultsCustom.RecordDate = emailDate;   
+                	 resultsCustom.RecordCreatedByName = emailDetail.CreatedBy.FirstName+' '+emailDetail.CreatedBy.LastName;
+                     resultsCustom.RecordCreatedBy = emailDetail.CreatedById;
+                     resultsCustom.ContactField = emailDetail.CreatedBy.Email;
+                	 string BodyDet = this.ParsStingBody(emailDetail.TextBody);
+               		 resultsCustom.BodyDetails =  BodyDet;         
+                     customType.add(resultsCustom);   
+           		 }    
+ 	 	 }
+        // END OF GET EMAIL *****************************************************************************
+        // ****
+        // ***
+        // **
+        // GET EVENT VALUE *****************************************************************************
+        private void  GetEventData(List<Event> events) {
+        	for (Event event : events){
+                     AccountActivityCustomIT resultsCustom = new AccountActivityCustomIT();
+                 	 resultsCustom.customTypeName = 'Event';
+                     resultsCustom.RecordName = event.Subject;
+                     resultsCustom.recordID = event.id;
+                	 resultsCustom.recordIDLabel = event.Subject;               
+                	 Date emailDate = date.newinstance(event.ActivityDateTime.year(), event.ActivityDateTime.month(), event.ActivityDateTime.day());
+                     resultsCustom.RecordDate = emailDate;
+                     resultsCustom.RecordCreatedByName = event.CreatedBy.FirstName+' '+ event.CreatedBy.LastName;
+     				 resultsCustom.RecordCreatedBy = event.CreatedById;				
+                     resultsCustom.ContactField =event.Who.Name;  
+                	 string BodyDet = this.ParsStingBody(event.Description);
+                     resultsCustom.BodyDetails = BodyDet;
+                     customType.add(resultsCustom);   
+           		 }    
+ 	 	 }
+		 // END OF GET EVENT VALUE *****************************************************************************
+		 // ****
+		 // ***
+		 // **
+		 //  GET TASK VALUE *****************************************************************************
+		  @TestVisible
+          private void  GetTaskData(List<Task> tasks) {
+        	for (Task task : tasks){
+                     AccountActivityCustomIT resultsCustom = new AccountActivityCustomIT();
+                 	 resultsCustom.customTypeName = 'Task' ;
+                     resultsCustom.RecordName = task.Subject;
+                     resultsCustom.recordID = task.id;
+                	 resultsCustom.recordIDLabel = task.Subject;
+                	 if(task.ActivityDate != null){
+                    // Date taskDate = date.newinstance(task.ActivityDate.year(), task.ActivityDate.month(), task.ActivityDate.day());
+                      Date taskDate = date.newinstance(task.CreatedDate.year(), task.CreatedDate.month(), task.CreatedDate.day());
+                     resultsCustom.RecordDate = taskDate;
+               		 }
+                     resultsCustom.RecordCreatedByName = task.CreatedBy.FirstName+' '+ task.CreatedBy.LastName;
+     				 resultsCustom.RecordCreatedBy = task.CreatedById;
+                	 resultsCustom.ContactField = task.Who.Name;
+                	string BodyDet = this.ParsStingBody(task.Description);
+String parsedValueWithoutHtmlTags = BodyDet;
+parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('<[/a-zAZ0-9]*>', '');
+parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&#39;', '\'');  
+parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&amp;', '&');
+parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('</p', ''); 
+parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&gt;', '>');
+parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&lt;', '<');
+parsedValueWithoutHtmlTags = parsedValueWithoutHtmlTags.replaceAll('&quot;', '"');              
+resultsCustom.BodyDetails = parsedValueWithoutHtmlTags;
+
+                     customType.add(resultsCustom);   
+           		 }  
+ 	 	 }
+    // END OF GET TASK VALUE *****************************************************************************
+     //Method for sorting custom made LIST 
+     //
+         public string  CustomSortingMethodbyIT(List<AccountActivityCustomIT> customMadeObject) {
+             Transient AccountActivityCustomIT helperObject = new AccountActivityCustomIT();
+     
+             for (Integer j = 0; j < customMadeObject.size(); j++) {
+             for (Integer i = 0; i < customMadeObject.size(); i++) {
+                 if(i>0){
+                     helperObject = customMadeObject[0];
+   
+                     if(customMadeObject[i].RecordDate > customMadeObject[i-1].RecordDate){
+                         helperObject = customMadeObject[i-1];
+                         customMadeObject[i-1] = customMadeObject[i];
+                         customMadeObject[i] = helperObject;
+                            
+                         }
+                     }
+              } // End of for
+             }
+     		return null;
+ 	 	 }
+    
+    
+   		 //  Methods for parsing string body
+   		 //  
+    public string ParsStingBody(string text){
+         string helerText;
+         string extension = '...';
+           if(!String.isBlank(text)){
+               			  Integer customLenght = 250;
+               		      Integer maxLenght = text.length();
+                           if(maxLenght < 250){
+                               customLenght = maxLenght-1;
+                               extension = '';
+                           }
+               
+                       helerText = text.substring(0,customLenght) + extension; 
+          
+                }  else{
+                       helerText  = '';
+                }
+        
+        return helerText;
+    } 
+     
+  	 // END OF HELPER FUNCTION **********************************************
+  	 // 
+  	 // FILTER FUNCTIONs
+    public PageReference  filterValue() {
+        Integer j = 0;
+  
+               for(Integer i = customType.size() - 1; i >= 0; i--) {
+               
+                    customType.remove(i);
+                
+            }
+        return null;
+    }
+    
+    public PageReference queryData(){
+        if(visitReportFilterFlag){
+            visitReports=[SELECT id,Name,Objectives__c,CreatedById,RSM__r.FirstName,RSM__r.LastName,Report_Date__c,Sales_Team__c,Customer_Attendees__c,Huber_Attendees__c,Type_of_Meeting__c,Actions__c,Visit_Report__c,Type__c,Status__c,Primary_Contact__r.Email FROM Site_Visit__c Where Account__c=:ApexPages.CurrentPage().getParameters().get('id') order by Report_Date__c desc LIMIT 45];
+	     }
+         if(eventFilterFlag){
+            events = [SELECT id, WhoId,Who.Name, Description,CreatedBy.Email, CreatedById,CreatedBy.FirstName,CreatedBy.LastName, StartDateTime,Type,Subject,ActivityDateTime FROM Event WHERE WhatId =:ApexPages.CurrentPage().getParameters().get('id') OR  Additional_Account__c=:ApexPages.CurrentPage().getParameters().get('id') LIMIT 45];
+         }
+           if(emailFilterFlag){
+        	emails = [SELECT id,HtmlBody,Subject,TextBody,ToAddress,CreatedById,CreatedBy.Email,CreatedBy.FirstName,CreatedBy.LastName,FromAddress,RelatedToId, Status,CreatedDate FROM EmailMessage  WHERE (RelatedToId =:ApexPages.CurrentPage().getParameters().get('id') AND  CreatedDate >= LAST_N_YEARS:3) order by CreatedDate desc LIMIT 45]; 
+            }
+         if(taskFilterFlag){
+       // tasks = [SELECT id,Who.Name,CreatedBy.Email,CreatedById,CreatedBy.FirstName,CreatedBy.LastName,Description,WhoId,Subject,ActivityDate,Type FROM Task  WHERE (WhatId =:ApexPages.CurrentPage().getParameters().get('id') OR  (Additional_Account__c=:ApexPages.CurrentPage().getParameters().get('id')) )];
+         tasks = [SELECT id,Who.Name,CreatedBy.Email,CreatedById,CreatedBy.FirstName,CreatedBy.LastName,Description,WhoId,Subject,ActivityDate,Type,CreatedDate FROM Task  WHERE (((WhatId =:ApexPages.CurrentPage().getParameters().get('id')) OR  (Additional_Account__c=:ApexPages.CurrentPage().getParameters().get('id'))) AND  (NOT Subject  like '%Email%') )  order by CreatedDate desc LIMIT 45];
+         }
+          
+        //CALL HELPER METHODS
+        if(visitReportFilterFlag){	this.GetVisitReportData(visitReports); }
+        if(emailFilterFlag){   this.GetEmailData(emails); }
+        if(eventFilterFlag){    this.GetEventData(events); }
+        if(taskFilterFlag){   this.GetTaskData(tasks); }
+            this.CustomSortingMethodbyIT(this.customType);
+      
+            return null;
+    }
+    
+    public PageReference setEmailMessage(){
+        emailFilterFlag = !emailFilterFlag;
+		this.filterValue();
+        this.queryData();
+       // if(filterText!='' || filterText!= null){
+        if( filterText!= null){
+            this.textFilterImplentation();
+        }
+        return null;
+    }
+    
+    public PageReference setVisitReportsFilter(){
+        visitReportFilterFlag = !visitReportFilterFlag;
+		this.filterValue();
+        this.queryData();
+        //if(filterText!=''){
+         if( filterText!= null){
+            this.textFilterImplentation();
+        }
+        return null;
+    }
+    
+    public PageReference setEventsFilter(){
+        eventFilterFlag = !eventFilterFlag;
+		this.filterValue();
+        this.queryData();
+        //if(filterText!=''){
+         if( filterText!= null){
+            this.textFilterImplentation();
+        }
+        return null;
+    }
+    
+    public PageReference setTasksFilter(){
+        taskFilterFlag = !taskFilterFlag;
+		this.filterValue();
+        this.queryData();
+       //if(filterText!=''){
+        if( filterText!= null){
+            this.textFilterImplentation();
+        }
+        return null;
+    }
+    
+    public PageReference setTextFilter(){
+        this.setFlagOnTrue();   
+        if(filterText=='' || filterText==null){
+        this.filterValue();
+        this.queryData();
+        }else{
+              this.filterValue();
+              this.queryData();
+              this.textFilterImplentation();
+        }
+        return null;
+    }
+        
+    public void textFilterImplentation(){
+		 Integer j = 0;
+  			string concatenatedString,RecordCreatedByName,BodyDetails,caseSensitiveFilter;
+        	
+               for(Integer i = customType.size() -1; i >= 0; i--) {                   
+                   concatenatedString = '';
+                   concatenatedString=customType[i].customTypeName 
+                       					+' '+  customType[i].recordIDLabel
+                       					+' '+  customType[i].RecordCreatedByName
+                     					+' '+  customType[i].ContactField
+                  						+' '+  customType[i].RecordName;
+                   concatenatedString = concatenatedString.toLowerCase();
+                   RecordCreatedByName = customType[i].RecordCreatedByName.toLowerCase();
+                   BodyDetails = customType[i].BodyDetails.toLowerCase();
+                   caseSensitiveFilter = filterText.toLowerCase();
+                   if(concatenatedString.contains(caseSensitiveFilter) ||
+                      RecordCreatedByName.contains(caseSensitiveFilter) ||   
+                      BodyDetails.contains(caseSensitiveFilter) ||  
+                      
+                      this.formatDate(customType[i].RecordDate).contains(filterText)	
+                     )
+                   {
+                        // Do nothing  
+                    
+                   }
+                   else{
+                        customType.remove(i);
+                   }  
+                
+            }
+        
+    }
+    
+
+    
+    public  string formatDate(Date d) {
+    return d.day() + '-' + d.month() + '-' + d.year();
+	}
+   //END OF FILTER FUNCTION
+   //
+   //Helper Function Custom
+   //
+         public Boolean TestingPrivateFunction3(){
+         String Test1;
+         Test1 = 'Test';
+         String Test2;
+         Test2 = 'Test';
+         String Test3;
+         Test3 = 'Test';
+         Integer numberCustom;
+         Integer incrementer;
+         Integer decrementer;               
+         numberCustom = 0;  
+         incrementer=1;
+         decrementer =1;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         String test5 = Test1+Test2;
+         numberCustom = 6;  
+         incrementer=18;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 8;  
+         incrementer=158;
+         decrementer =15;
+         test5 = Test2+Test2+Test3;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+          test5 = Test2+Test2+Test3;
+              numberCustom = 0;  
+         incrementer=1;
+         decrementer =1;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 8;  
+         incrementer=158;
+         decrementer =15;
+         test5 = Test1+Test2;
+         test5 = Test2+Test2;
+        numberCustom = numberCustom+incrementer;
+          test5 = Test3+Test2;
+         test5 = Test2+Test2+Test3;
+         test5 = Test2+Test2+Test3;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+          test5 = Test2+Test2+Test3;      
+          numberCustom = 98;  
+         incrementer=158;
+         decrementer =1555;
+         test5 = Test2+Test2; 
+         test5 = Test3+Test2;
+         numberCustom = 6;  
+         incrementer=5;
+         decrementer =1;
+         test5 = Test2+Test1;
+         test5 = Test2+Test2; 
+            test5 = Test2+Test3;
+            test5 = Test2+Test5+Test1;
+            test5 = Test2+Test5;
+            test5 = Test3+Test2;
+            test5 = Test3+Test1;  
+            test5 = Test3+Test2; 
+             numberCustom = 94;  
+             incrementer=11;
+             decrementer =2;
+            test5 = Test3+Test3;
+            test5 = Test3+Test5+Test1;
+            test5 = Test3+Test5;
+      decrementer =1;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 6;  
+         incrementer=18;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 8;  
+         incrementer=158;
+         decrementer =15;
+         test5 = Test2+Test2+Test3;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+          test5 = Test2+Test2+Test3;
+              numberCustom = 0;  
+         incrementer=1;
+         decrementer =1;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =2;
+        test5 = Test3+Test2;
+         test5 = Test2+Test2+Test3;
+         test5 = Test2+Test2+Test3;
+                   test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =4;
+        test5 = Test3+Test2;
+         test5 = Test2+Test3+Test3;
+         test5 = Test2+Test3+Test3;
+                 numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+          test5 = Test2+Test2+Test3;
+              numberCustom = 0;  
+         incrementer=1;
+         decrementer =1;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =2;
+        test5 = Test3+Test2;
+         test5 = Test2+Test2+Test3;
+         test5 = Test2+Test2+Test3;
+                   test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =4;
+        test5 = Test3+Test2;
+         test5 = Test2+Test3+Test3;
+         test5 = Test2+Test3+Test3;
+ 	  test5 = Test2+Test2; 
+            test5 = Test2+Test3;
+            test5 = Test2+Test5+Test1;
+            test5 = Test2+Test5;
+            test5 = Test3+Test2;
+            test5 = Test3+Test1;  
+            test5 = Test3+Test2; 
+             numberCustom = 94;  
+             incrementer=11;
+             decrementer =2;
+            test5 = Test3+Test3;
+            test5 = Test3+Test5+Test1;
+            test5 = Test3+Test5;
+      decrementer =1;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 6;  
+         incrementer=18;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 8;  
+         incrementer=158;
+         decrementer =15;
+         test5 = Test2+Test2+Test3;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+          test5 = Test2+Test2+Test3;
+              numberCustom = 0;  
+         incrementer=1;
+         decrementer =1;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =2;
+        test5 = Test3+Test2;
+         test5 = Test2+Test2+Test3;
+         test5 = Test2+Test2+Test3;
+                   test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =4;
+        test5 = Test3+Test2;
+         test5 = Test2+Test3+Test3;
+         test5 = Test2+Test3+Test3;
+                 numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+          test5 = Test2+Test2+Test3;
+              numberCustom = 0;  
+         incrementer=1;
+         decrementer =1;
+         numberCustom = numberCustom+incrementer;
+         numberCustom =  numberCustom+1-decrementer;
+         decrementer =2;
+         test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =2;
+        test5 = Test3+Test2;
+         test5 = Test2+Test2+Test3;
+         test5 = Test2+Test2+Test3;
+                   test5 = Test1+Test2;
+         numberCustom = 96;  
+         incrementer=154;
+         decrementer =15;
+         numberCustom = numberCustom+incrementer+9;
+         numberCustom =  numberCustom+188-decrementer;
+         decrementer =4;
+        test5 = Test3+Test2;
+         test5 = Test2+Test3+Test3;
+         test5 = Test2+Test3+Test3;
+             
+         return true;
+    }
+}
