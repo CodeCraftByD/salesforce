@@ -1,0 +1,160 @@
+<template>
+  <div class={getContainerClass}>
+    <!--Show spinner when loading-->
+    <template if:true={loading}>
+      <lightning-spinner alternative-text="Loading"></lightning-spinner>
+    </template>
+
+    <!--Dynamically assign classes to lock scroll when filter page is active-->
+    <!--Filter Page-->
+
+
+    <lightning-layout multiple-rows>
+
+      <template if:true={showUnsupportedBanner}>
+        <lightning-layout-item size="12" class="slds-card slds-p-vertical_small slds-p-horizontal_large slds-m-bottom_medium card-shadow">
+          <div class="slds-grid slds-gutters slds-wrap" style="padding: 10px 20px;font-size: 20px;max-width: 1280px;margin: 0 auto;">
+            <p>{labels.areYouAFTELabel}</p>
+            <br />           
+          </div>
+        </lightning-layout-item>
+      </template>
+      <template if:false={showUnsupportedBanner}>
+
+        <!--Header-->
+        <template if:true={isMobile}>
+          <lightning-layout-item size="12" class="slds-border_bottom">
+            <c-page-header heading={labels.searchMentorsLabel}></c-page-header>
+          </lightning-layout-item>
+        </template>
+
+        <!--Search & Current Filters-->
+        <template if:true={isMobile}>
+          <lightning-layout-item class="slds-p-top_small slds-p-horizontal_small" size="12">
+            <template if:true={showSearchBar}>
+              <c-search-bar onfilterclicked={toggleFilters} onsearch={searchHandler}>
+              </c-search-bar>
+            </template>
+          </lightning-layout-item>
+          <lightning-layout-item padding="horizontal-small" class="slds-p-bottom_small" size="12">
+            <template if:true={showFilters}>
+              <div class="slds-p-top_x-small">
+                <c-filter-panel onclose={toggleFilters} onfilter={filterChangedHandler} start-filters={filterCategories}>
+                </c-filter-panel>
+              </div>
+              <div class="slds-clearfix">
+                <div class="slds-float_right">
+                  <lightning-button label="Reset Filters" title="Reset Filters" icon-name="utility:loop" class="slds-m-left_x-small" onclick={resetFilters}></lightning-button>
+                  <lightning-button variant="brand" label="Search for a Mentor" title="Search for a Mentor" class="slds-m-left_x-small" onclick={handleRetrieveMentors}></lightning-button>
+                </div>
+              </div>
+            </template>
+          </lightning-layout-item>
+          <lightning-layout-item padding="horizontal-small" size="12">
+            <c-upload-picture-reminder></c-upload-picture-reminder>
+          </lightning-layout-item>
+        </template>
+
+        <template if:false={isMobile}>
+          <template if:true={showFilteringOptions}>
+            <lightning-layout-item size="12" class="slds-card slds-p-around_small slds-m-bottom_medium card-shadow">
+              <header class="slds-has-flexi-truncate slds-m-bottom_medium">
+                <h2 class="slds-text-heading_medium">
+                  <strong>{labels.filterCardTitle}</strong>
+                </h2>
+              </header>
+              <template if:true={showSearchBar}>
+                <c-search-bar onfilterclicked={toggleFilters} onsearch={searchHandler}>
+                </c-search-bar>
+              </template>
+              <template if:false={filtersAlwaysOn}>
+                <div class="filter-toggle slds-p-around_x-small" onclick={toggleFilters}>
+                  <template if:true={showFilters}>
+                    <lightning-icon icon-name="utility:chevrondown" alternative-text="Expand" title="Expand" size="x-small"></lightning-icon>
+                  </template>
+                  <template if:false={showFilters}>
+                    <lightning-icon icon-name="utility:chevronright" alternative-text="Expand" title="Expand" size="x-small"></lightning-icon>
+                  </template>
+                  <span class="slds-truncate slds-p-left_x-small" title="Show Filters">{labels.AdvancedFiltersLabel}</span>
+                </div>
+              </template>
+              <template if:true={showFilters}>
+                <div class="slds-p-top_x-small">
+                  <c-filter-panel onclose={toggleFilters} onfilter={filterChangedHandler} start-filters={filterCategories}>
+                  </c-filter-panel>
+                </div>
+                <div class="slds-clearfix">
+                  <div class="slds-float_right">
+                    <lightning-button label="Reset Filters" title="Reset Filters" icon-name="utility:loop" class="slds-m-left_x-small" onclick={resetFilters}></lightning-button>
+                    <lightning-button variant="brand" label="Search for a Mentor" title="Search for a Mentor" class="slds-m-left_x-small" onclick={handleRetrieveMentors}></lightning-button>
+                  </div>
+                </div>
+              </template>
+            </lightning-layout-item>
+          </template>
+          <lightning-layout-item size="12">
+            <c-upload-picture-reminder></c-upload-picture-reminder>
+          </lightning-layout-item>
+        </template>
+
+        <!--If mentors found, display mentor list-->
+        <template if:false={noMentorsFound}>
+          <!--*****MOBILE*****-->
+          <template if:true={isMobile}>
+            <lightning-layout-item padding="horizontal-small" size="12" aria-live="polite">
+              <c-einstein-header heading={labels.searchBasedOnYourBackgroundLabel} sub-heading={labels.weShortlistedGreatMentorsForYouLabel}></c-einstein-header>
+            </lightning-layout-item>
+            <lightning-layout-item padding="around-small" size="12">
+              <template for:each={availableMentors} for:item="mentor">
+                <c-person-card key={mentor.Id} user={mentor} value={mentor.Id} onbookmarkdmentor={bookmarkdmentorHandler} onselected={userSelectedHandler} onclick={handleOpenRecordClick} onupdated={loadData}></c-person-card>
+              </template>
+            </lightning-layout-item>
+            <template if:true={noAvailableMentors}>
+              <lightning-layout-item padding="around-small" size="12">
+                <c-illustration text={labels.noAvailableMentorsForYouLabel}></c-illustration>
+              </lightning-layout-item>
+            </template>
+          </template>
+          <!--*****DESKTOP*****-->
+          <template if:false={isMobile}>
+            <lightning-layout-item size="12" aria-live="polite">
+              <article class="slds-card slds-p-around_small card-shadow">
+                <header class="slds-has-flexi-truncate slds-m-bottom_medium">
+                  <h2 class="slds-text-heading_medium suggestionslabel"><strong>{labels.mentorSuggestionsForYouLabel}</strong></h2>
+                </header>
+                <div class="slds-grid slds-gutters slds-wrap">
+                  <template for:each={availableMentors} for:item="mentor">
+                    <div key={mentor.Id} onclick={handleOpenRecordClick} class="slds-col slds-size_1-of-1 slds-medium-size_1-of-2 slds-large-size_1-of-3 slds-m-bottom_small">
+                      <c-person-card user={mentor} onbookmarkmentor={bookmarkdmentorHandler} onselected={userSelectedHandler} value={mentor.Id} onclick={handleOpenRecordClick}  onupdated={loadData} show-desktop-request-buttons>
+                      </c-person-card>
+                    </div>
+                  </template>
+                </div>
+                <template if:true={noAvailableMentors}>
+                  <lightning-layout-item padding="around-small" size="12">
+                    <c-illustration text={labels.noAvailableMentorsForYouLabel}></c-illustration>
+                  </lightning-layout-item>
+                </template>
+              </article>
+            </lightning-layout-item>
+          </template>
+        </template>
+
+        <!--If no mentors found, show 404 message-->
+        <template if:true={noMentorsFound}>
+          <lightning-layout-item padding="around-small" size="12">
+            <c-illustration text={filterErrorMessage}></c-illustration> <!-- change -->
+          </lightning-layout-item>
+        </template>
+
+      </template>
+
+
+
+
+
+      <c-q-footer></c-q-footer>
+
+    </lightning-layout>
+  </div>
+</template>

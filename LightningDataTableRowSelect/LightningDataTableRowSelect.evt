@@ -1,5 +1,0 @@
-<aura:event type="COMPONENT">
-    <aura:attribute name="allRowIdsSelected" type="String[]" required="true"/>
-    <aura:attribute name="rowIds" type="String[]"/>
-    <aura:attribute name="action" type="String"/>
-</aura:event>

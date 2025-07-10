@@ -1,0 +1,116 @@
+:host {
+  width: 100%;
+}
+
+.oversized-button {
+  width: 100%;
+  height: 44px;
+  border-radius: 4px;
+  border: 2px solid #F3F2F2;
+}
+
+.oversized-button-brand {
+  background-color: #006BC8;
+  border: 2px solid transparent;
+}
+
+.oversized-button-disabled {
+  background-color: #c7c5c3;
+  border: 2px solid transparent;
+}
+
+.oversized-button-disabled {
+  background-color: #c9c7c5 !important;
+  cursor: not-allowed;
+  border: 2px solid transparent;
+  pointer-events: auto !important; /* Allow hover events while disabling clicks */
+}
+
+.tooltip-container {
+  position: relative;
+  display: inline-block;
+}
+
+.button-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  gap: 0.5rem;
+}
+
+.tooltip-text {
+  visibility: hidden;
+  max-width: 250px; /* Maximum width */
+  width: max-content; /* Allow content to determine width */
+  min-width: 150px; /* Minimum width */
+  background-color: #16325c;
+  color: #fff;
+  text-align: left;
+  padding: 12px;
+  border-radius: 6px;
+  position: absolute;
+  z-index: 9999;
+  bottom: 150%; 
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  font-size: 13px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+}
+
+/* Arrow styling */
+.tooltip-text::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 20%; /* Position arrow on the left side */
+  margin-left: -8px;
+  border-width: 8px;
+  border-style: solid;
+  border-color: #16325c transparent transparent transparent;
+}
+
+/* Show tooltip on hover */
+.tooltip-container:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Responsive behavior for different screen sizes */
+@media only screen and (max-width: 768px) {
+  .tooltip-text {
+    width: calc(100vw - 40px); /* Dynamic width based on viewport */
+    max-width: 280px;
+    left: 0;
+    transform: translateX(0); /* Don't center, align left */
+    right: auto;
+  }
+  
+  /* Keep arrow aligned with left side */
+  .tooltip-text::after {
+    left: 20%;
+  }
+}
+
+/* Additional responsive adjustment for very small screens */
+@media only screen and (max-width: 320px) {
+  .tooltip-text {
+    width: calc(100vw - 20px); /* Even more adaptive */
+    left: -12px; /* Adjust position to ensure visibility */
+  }
+}
+
+/* Smart positioning class that can be toggled via JavaScript */
+.tooltip-right-aligned {
+  left: auto;
+  right: 0;
+  transform: translateX(0);
+}
+
+.tooltip-right-aligned::after {
+  left: auto;
+  right: 20%;
+}

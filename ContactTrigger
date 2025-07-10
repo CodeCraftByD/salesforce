@@ -1,8 +1,0 @@
-trigger ContactTrigger on Contact (before insert, after insert, after update, after delete) {
-   Trigger_Configuration__c triggerConfiguration = Trigger_Configuration__c.getInstance('Run Contact Trigger');
-    if(triggerConfiguration?.isRun__c == true || Test.isRunningTest())
-    {
-        TriggerDispatcher.run(new ContactTriggerHandler(), 'Contact');
-    }
-    
-}
