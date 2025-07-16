@@ -1,0 +1,192 @@
+<template>
+  <div onkeydown={handleKeyDown}>
+  <!--Show spinner if loading-->
+  <template if:true={loading}>
+    <lightning-spinner alternative-text="Loading"></lightning-spinner>
+  </template>
+  <div class="slds-is-relative container slds-p-around_small" >
+    <header class="header" if:false={headerNotRequired}>
+      <template if:true={progressIsSet}>
+        <div class="slds-grid slds-grid_vertical-align-center slds-size_1-of-1">
+          <div class="slds-size_2-of-12"></div>
+          <div class="slds-size_8-of-12">
+            <lightning-progress-bar value={progress} variant="circular"></lightning-progress-bar>
+          </div>
+          <div class="slds-size_2-of-12 slds-text-align_center">
+         </div>
+        </div>
+      </template>
+      <template if:false={progressIsSet}>
+        <div class="slds-grid slds-grid_vertical-align-center slds-size_1-of-1">
+          <div class="slds-size_12-of-12 slds-text-align_center">
+          </div>
+        </div>
+      </template>
+    </header>
+
+    <section class="body">
+
+      <!-- Mentee Competencies and Experiences-->
+      <template if:true={showMenteeSkills}>
+        <template if:true={showCombo}>
+          <h2 class="slds-text-heading_medium slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.competenciesMentorFramingLabel}
+          </h2>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h3 class="slds-text-heading_small slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            <abbr class="slds-required" title="required">* </abbr>
+            {labels.howWouldYouLikeToBeSupportedLabel}
+          </h3>
+          </div>
+          <template if:true={picklistFieldValues}> 
+            <c-m-fmulti-select-combobox aria-describedby="showExperiencesToImproveErrorId" options={fieldSettings.experienceImproveField.options} selected-values={fieldSettings.experienceImproveField.value} custom-label={labels.PleaseSelectExperiencesLabel} onselect={handleSelected} onkeyup={handleSelected} multi-select data-field={fieldSettings.experienceImproveField.field.fieldApiName} invalid={showExperiencesToImproveError}> </c-m-fmulti-select-combobox>
+          </template>
+          <h2 class=" slds-text-heading_medium slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.mentorFunctionalCompetenciesFramingLabel}
+          </h2>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h3 class="slds-text-heading_small slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            <abbr class="slds-required" title="required">* </abbr>
+            {labels.whichCompetenciesDoYouWishToImproveLabel}
+            <div class="slds-m-left_x-small slds-show_inline-block slds-is-relative">
+              <a target="_blank" rel="noopener" href="https://concierge.it.salesforce.com/articles/en_US/How_To/Great-Competencies-and-Functional-Competencies" aria-describedby="help">
+                Learn more
+              </a>
+            </div>
+          </h3>
+          </div>
+          <template if:true={picklistFieldValues}>
+            <c-m-fmulti-select-combobox aria-describedby="showGreatCompetenciesToImproveErrorId" options={fieldSettings.greatCompetenciesImproveField.options} selected-values={fieldSettings.greatCompetenciesImproveField.value} custom-label={labels.PleaseselectgreatcompetenciesLabel}  onselect={handleSelected} onkeyup={handleSelected} multi-select data-field={fieldSettings.greatCompetenciesImproveField.field.fieldApiName}  invalid={showGreatCompetenciesToImproveError}> </c-m-fmulti-select-combobox>
+          </template>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h3 class="slds-text-heading_small slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.whichFunctionalCompetenciesSpecificallyDoYouWishToImproveLabel}
+            <div class="slds-m-left_x-small slds-show_inline-block slds-is-relative">
+              <a target="_blank" rel="noopener" href="https://concierge.it.salesforce.com/articles/en_US/How_To/Great-Competencies-and-Functional-Competencies" aria-describedby="help">
+                 Learn more
+              </a>
+            </div>
+          </h3>
+          </div>
+          <c-m-fmulti-select-combobox aria-describedby="showFunctionalCompetenciesToImproveErrorId" options={roleCompetencyValues} selected-values={fieldSettings.functionalCompetenciesImproveField.value} data-field={fieldSettings.functionalCompetenciesImproveField.field.fieldApiName} custom-label={labels.PleaseselectfunctionalcompetenciesLabel} multi-select invalid={showFunctionalCompetenciesToImproveError} > </c-m-fmulti-select-combobox>
+        </template>
+      </template>
+
+      <!-- Mentor Competencies and Experiences-->
+      <template if:true={showMentorSkills}>
+        <template if:true={showCombo}>
+          <h2 class="slds-text-heading_medium slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.competenciesMenteeFramingLabel}
+          </h2>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h3 class="slds-text-heading_small slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            <abbr class="slds-required" title="required">* </abbr>
+            {labels.howCanYouSupportOthersLabel}
+          </h3>
+          </div>
+          <c-m-fmulti-select-combobox aria-describedby="showHowCanYouSupportOthersErrorId"  options={fieldSettings.experienceField.options} custom-label={labels.PleaseSelectExperiencesLabel} onselect={handleSelected} onkeyup={handleSelected} multi-select selected-values={fieldSettings.experienceField.value} data-field={fieldSettings.experienceField.field.fieldApiName} invalid={showHowCanYouSupportOthersError}> </c-m-fmulti-select-combobox>
+          <h2 class="slds-text-heading_medium slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.menteeFunctionalCompetenciesFramingLabel}
+          </h2>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h3 class="slds-text-heading_small slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            <abbr class="slds-required" title="required">* </abbr>
+            {labels.whatCompetenciesAreYouAbleToShareLabel}
+            <div class="slds-m-left_x-small slds-show_inline-block slds-is-relative">
+              <a target="_blank" rel="noopener" href="https://concierge.it.salesforce.com/articles/en_US/How_To/Great-Competencies-and-Functional-Competencies" aria-describedby="help">
+                Learn more
+              </a>
+            </div>
+          </h3>
+          </div>
+          <c-m-fmulti-select-combobox aria-describedby="showWhatGreatCompetenciesAreYouAbleToShareErrorId" options={fieldSettings.greatCompetenciesField.options} custom-label={labels.PleaseselectgreatcompetenciesLabel} selected-values={fieldSettings.greatCompetenciesField.value} onselect={handleSelected} onkeyup={handleSelected} multi-select data-field={fieldSettings.greatCompetenciesField.field.fieldApiName} invalid={showWhatGreatCompetenciesAreYouAbleToShareError}>
+          </c-m-fmulti-select-combobox>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h3 class="slds-text-heading_small slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.whichFunctionalCompetenciesSpecificallyAreYouAbleToShareLabel}
+            <div class="slds-m-left_x-small slds-show_inline-block slds-is-relative">
+              <a target="_blank" rel="noopener" href="https://concierge.it.salesforce.com/articles/en_US/How_To/Great-Competencies-and-Functional-Competencies" aria-describedby="help">
+                Learn more
+              </a>
+            </div>
+          </h3>
+        </div>
+          <c-m-fmulti-select-combobox aria-describedby="showWhatFunctionalCompetenciesAreYouAbleToShareErrorId" options={roleCompetencyValues} data-field={fieldSettings.functionalCompetenciesField.field.fieldApiName} selected-values={fieldSettings.functionalCompetenciesField.value} custom-label={labels.PleaseselectfunctionalcompetenciesLabel} onselect={handleSelected} onkeyup={handleSelected} multi-select invalid={showWhatFunctionalCompetenciesAreYouAbleToShareError} > </c-m-fmulti-select-combobox>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h3 class="slds-text-heading_small slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.HowManyMenteesDoYouCurrentlyHaveTheCapacityToMentorEffectively}
+          </h3>
+        </div>
+          <div class="slds-form-element">
+            <span class="slds-form-element__label">
+              <abbr class="slds-required" title="required">* </abbr>
+              <label class="slds-m-right_none color-fix slds-form-element__label">{labels.pleaseSelectMenteeCapacityLabel}</label>
+            </span>
+            <div class="slds-form-element__control width-control">
+              <button class="slds-button slds-button_icon slds-button_icon-small slds-input__button_decrement" title="Decrease Capacity" onclick={decrementCounter} >
+                <lightning-icon icon-name="utility:ban" alternative-text="Decrement counter"  title="Decrement counter" size="x-small"></lightning-icon>
+             </button>
+              <input type="number" value={capacity} min="0" max="10" class="slds-input slds-input_counter inpclass" disabled="" />
+              <button class="slds-button slds-button_icon slds-button_icon-small slds-input__button_increment" title="Increase Capacity" onclick={incrementCounter}>
+                <lightning-icon icon-name="utility:new" alternative-text="Increment counter" title="Increment counter" size="x-small"></lightning-icon>
+          </button>
+          <p id="showCapacityErrorId" style="color:#ea001e" if:true={showCapacityError} aria-live="polite">Mentee capacity must be greater than zero</p>
+            </div>
+          </div>
+        </template>
+      </template>
+
+      <!--Location-->
+      <template if:true={showLocation}>
+        <template if:true={showCombo}>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h2 class="slds-text-heading_medium slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.whatTypeOfMentoringDoYouPreferLabel}</h2>
+          </div>
+          <div class="slds-m-bottom_small slds-size_1-of-1">
+            <template if:true={picklistFieldValues}>
+              <c-m-fmulti-select-combobox aria-describedby="showWhatTypeOfMentoringDoYouPreferErrorId" options={fieldSettings.mentoringTypeField.options} selected-values={fieldSettings.mentoringTypeField.value} custom-label={labels.PleaseselectyourpreferenceLabel}  onselect={handleSelected} onkeyup={handleSelected} multi-select is-combobox="false" data-field={fieldSettings.mentoringTypeField.field.fieldApiName} invalid={showWhatTypeOfMentoringDoYouPreferError}> </c-m-fmulti-select-combobox>
+            </template>
+          </div>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+          <h2 class="slds-text-heading_medium slds-size_1-of-1 slds-m-top_large slds-p-bottom_small">
+            {labels.whatLanguagesDoYouPreferLabel}</h2>
+            </div>
+          <div class="slds-m-bottom_small slds-size_1-of-1">
+            <template if:true={picklistFieldValues}>
+              <c-m-fmulti-select-combobox aria-describedby="showWhatLanguagesDoYouPreferErrorId" options={fieldSettings.mentoringLanguageField.options} selected-values={fieldSettings.mentoringLanguageField.value} custom-label={labels.PleaseselectpreferredlanguageLabel} onselect={handleSelected} onkeyup={handleSelected} multi-select data-field={fieldSettings.mentoringLanguageField.field.fieldApiName} invalid={showWhatLanguagesDoYouPreferError}> </c-m-fmulti-select-combobox>
+            </template>
+          </div>
+        </template>
+      </template>
+
+      <!--Interests-->
+      <template if:true={showInterests}>
+        <template if:true={showCombo}>
+          <h2 class="slds-text-heading_medium slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.tellUsAboutYourselfLabel}
+          </h2>
+          <lightning-textarea label={labels.BioLabel} placeholder={labels.thisDisplaysOnYouProfileAndHelpsPeopleLabel} value={fieldSettings.userBioField.value} data-field={fieldSettings.userBioField.field.fieldApiName} class="heightFix"></lightning-textarea>
+          <div class="slds-p-top_medium slds-p-bottom_small">
+            <h2 class="slds-text-heading_medium slds-size_1-of-1 ">
+              {labels.whatBestDescribesYouLabel}
+            </h2>
+          </div>
+         
+          <c-m-fmulti-select-combobox aria-describedby="showBestDescribedErrorId" options={fieldSettings.interestsField.options} selected-values={fieldSettings.interestsField.value} custom-label={labels.MyPersonalityLable} onselect={handleSelected} onkeyup={handleSelected} multi-select data-field={fieldSettings.interestsField.field.fieldApiName} invalid={showBestDescribedError}>
+          </c-m-fmulti-select-combobox>
+          <h2 class="slds-text-heading_medium slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+            {labels.whatIsYourLinkedInProfile}
+          </h2>
+          <lightning-input label={labels.LinkedinProfileLable} placeholder="https://www.linkedin.com/in/JoeBloggs" value={fieldSettings.linkedInField.value} data-field={fieldSettings.linkedInField.field.fieldApiName}></lightning-input>
+        </template>
+        <h2 class="slds-text-heading_medium slds-text-align_center slds-size_1-of-1 slds-p-top_medium slds-p-bottom_small">
+          {labels.whichEqualityGroupsDoYouSupportLabel}
+        </h2>
+        <c-equality-group-picker></c-equality-group-picker>
+
+      </template>
+    </section>
+  </div>
+</div>
+</template>
