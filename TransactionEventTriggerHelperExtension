@@ -1,0 +1,1373 @@
+/******************************************************************************************************************
+ * Copyright by Autodesk, Inc
+ *
+ * The information contained herein is confidential, proprietary to
+ * Autodesk, Inc., and considered a trade secret as defined in section
+ * agreement, expressly prescribing the scope and manner of such use.
+  * $Id$: TransactionEventTriggerHelperExtension
+ * $Created Date$: 25-July-2023
+ * $Author$: Aparna Anisetti
+* Modification Log
+    Ver   Date         Author                 Modification
+    1.0   01-04-2024   Naveen                 CRMEAGLE-879 NAMER: Support high volume Orders (up to 128 line items)
+ ********************************************************************************************************************/
+public without sharing class TransactionEventTriggerHelperExtension {
+    public static Map<Id, OpportunityLineItem> olisToUpdateMap = new Map<Id, OpportunityLineItem>();
+    public static List<ContractLineItem> cliListToUpdate = new List<ContractLineItem>();
+    public static Map<Id, OpportunityLineItem> olisToDeleteMap = new Map<Id, OpportunityLineItem>();
+    public static Map<String, String> oliNewOfferingIdMap = new Map<String, String>();
+    public static Map<String, String> oliPriceBook2IdMap = new Map<String, String>();
+    public static Map<String, String> oliCurrencyCodedMap = new Map<String, String>();
+    public static Map<String, OpportunityLineItem> olisToCreateMap = new Map<String, OpportunityLineItem>();
+    public static Map<Id, Opportunity> opptiesToUpdateMap = new Map<Id, Opportunity>();
+    public static Set<Id> invalidOppsToDeleteSCO = new Set<Id>();
+    public static Map<Id, True_Up__c> trueUpsToUpdateMap = new Map<Id, True_Up__c>();
+    public static Map<String, ContractLineItem> subsIdCliMap = new Map<String, ContractLineItem>();
+    public static Map<String, OpportunityLineItem> partialOlisToCreateMap = new Map<String, OpportunityLineItem>();
+    public static Set<String> partialOlisIdSet = new Set<String>();
+    public static Map<String, OpportunityLineItem> oliIdMap = new Map<String, OpportunityLineItem>();
+    public static Boolean isPartialRenewal = false;
+    public static List<Opportunity> newOpty = new List<Opportunity>();
+    public static Opportunity clonedNewOpp = new Opportunity();
+    public static String serviceContractId = null;
+    public static Map<String, TransactionEventTriggerHelperExtension.Order> opptyIdOrderMapTemp = new Map<String, TransactionEventTriggerHelperExtension.Order>();
+    public static Map<String, LineItem> missingLineItemsToCreate = new Map<String, LineItem>();
+    public static Boolean hasMidTermSwitchLineItems = false;
+    public static List<String> refSubsIds = new List<String>();
+    public static Map<String, LineItem> tradeInMap = new Map<String, LineItem>();
+    public static Map<String, LineItem> midTermCreationMap = new Map<String, LineItem>();
+    public static Map<String, OpportunityLineItem> pelSubsIdOlIMap = new Map<String, OpportunityLineItem>();
+    // public static List<ContractLineItem> cliLstToUpdateNullOpp = new List<ContractLineItem>();
+    public static Map<Id, ContractLineItem> cliLstToUpdateNullOppMap = new Map<Id, ContractLineItem>();
+    public static Set<String> sofOlisToUpdate = new Set<String>();
+    public static Set<Id> subscriptionOpportunityIds = new Set<Id>(); // DAASN-25492
+    public static Set<Id> oppIds = new Set<Id>();
+    public static Boolean pendingTradeInUpdates = false;
+    public static Boolean processOppClosure = false;
+    public static Boolean isOppCloneMTS = false;
+    public static Opportunity clonedNewOppMTS = new Opportunity();
+    public static List<Opportunity> clonedNewOppList = new List<Opportunity>();
+    public static Map<Id, ContractLineItem> cliLstToUpdateCloneOppMap = new Map<Id, ContractLineItem>();
+    public static LineItem sofLineItem = new LineItem();
+    public static Map<String, OpportunityLineItem> olisToCreateMapMTS = new Map<String, OpportunityLineItem>();
+    public static Boolean hasOpenLineItems = false;
+    public static Map<Id, ContractLineItem> cliLstToUpdCloneOppHasOpen = new Map<Id, ContractLineItem>();
+    public static Map<String, OpportunityLineItem> olisToCreateOpenLineItemsMap = new Map<String, OpportunityLineItem>();
+    public static Opportunity clonedNewRenewalOpp = new Opportunity();
+    public static List<Opportunity> clonedNewRenewalOppList = new List<Opportunity>();
+    public static Map<String, Double> conversion_rates = new Map<String, Double>();
+    private static Date orderChargeDate; //DAASN-25942
+
+    public static void processOrder(List<Transactions__e> txnOrderList) {
+        List<Transaction__c> txList = new List<Transaction__c>();
+        for (Transactions__e txe : txnOrderList) {
+            txList.addAll((List<Transaction__c>) Json.deserialize(txe.Details__c, List<Transaction__c>.class));
+        }
+        processOrder(txList);
+    }
+    public static void processOrder(List<Transaction__c> txList) {
+        Map<String, Transaction__c> opptyIdTransactionMap = new Map<String, Transaction__c>();
+        Map<String, Order> opptyIdOrderMap = new Map<String, Order>();
+
+        for (Transaction__c tx : txList) {
+            opptyIdTransactionMap.put(tx.Opportunity__c, tx);
+            //CRMEAGLE-879 Starts
+            if (tx.Opportunity__c != null && tx.Log__c == null && String.isNotBlank(tx.Transaction_Order_Number__c)) {
+                SUBS_GetOrderDetailsController.invokeGetOrderDetail(tx);
+            } else {
+                tx.Log__c = tx.Log__c.replace('currency', 'orderCurrency');
+                opptyIdOrderMap.put(tx.Opportunity__c, (TransactionEventTriggerHelperExtension.Order) Json.deserialize(tx.Log__c, TransactionEventTriggerHelperExtension.Order.class));
+                opptyIdOrderMapTemp.put(tx.Opportunity__c, (TransactionEventTriggerHelperExtension.Order) Json.deserialize(tx.Log__c, TransactionEventTriggerHelperExtension.Order.class));
+                orderChargeDate = processOrderOperations(opptyIdOrderMap.values()); //DAASN-25942
+                processOrderUpdates(opptyIdTransactionMap, opptyIdOrderMap, true);
+            }
+            opptyIdTransactionMap.clear();
+            opptyIdOrderMapTemp.clear();
+        }
+    }
+    public static void processOrderCharged(List<LineItem> orderlineItems, Map<String, OpportunityLineItem> subsIdOliMap, Map<String, OpportunityLineItem> refsubsIdOliMap, Map<String, OpportunityLineItem> refsubsIdsOliMap, Map<Id, OpportunityLineItem> trueUpOliMap, Map<String, List<OpportunityLineItem>> newOliMap, Opportunity opp, Order order, List<OpportunityLineItem> oppLineItems) {
+        String renewalStatus;
+        Integer i = 0;
+        Boolean oliCreationNeeded = false;
+        Boolean midTermCreationNeeded = false;
+        Boolean hasSwitchAction = false;
+        Boolean CloseOpptyIfRenewal = false;
+        for (OpportunityLineItem oli : oppLineItems) {
+            if (opp.CurrencyISOCode != order.price.orderCurrency && oli.Renewal_Status__c == 'Renewed') {
+                isPartialRenewal = true;
+            }
+        }
+        if (opp.CurrencyISOCode != order.price.orderCurrency) {
+            Set<String> isoCodes = new Set<String>();
+            isoCodes.add(opp.CurrencyISOCode);
+            isoCodes.add(order.price.orderCurrency);
+            if (isoCodes.size() > 1) {
+                for (CurrencyType curr : [SELECT IsoCode, ConversionRate FROM CurrencyType WHERE IsoCode IN :isoCodes]) {
+                    conversion_rates.put(curr.IsoCode, curr.ConversionRate);
+                }
+            }
+        }
+        if (isPartialRenewal) {
+            List<Opportunity> cloneOpp = TransactionEventTriggerHelperUtility.getAllOpportunityFields(new Set<String>{ opp.Id });
+            clonedNewOpp = cloneOpp[0].clone(false, true, true, true);
+            clonedNewOpp.StageName = 'Won';
+            clonedNewOpp.Actual_Close_Date__c = system.today(); //DAASN - 25878
+            clonedNewOpp.Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE;
+            clonedNewOpp.currencyIsoCode = order.price.orderCurrency;
+            clonedNewOpp.ACS_Opportunity_ID__c = '';
+            clonedNewOppList.add(clonedNewOpp);
+        }
+        Map<String, LineItem> refSubsIdsOrderLineItemMap = new Map<String, LineItem>();
+        Set<String> refSubsIdSet = new Set<String>();
+        for (LineItem li : orderlineItems) {
+            if (li.subscriptionInfo != null && li.state == 'CHARGED' && li.action == 'Switch' && String.isNotBlank(li.subscriptionInfo.referenceSubscriptionIds)) {
+                for (String refSubsIds : refsubsIdsOliMap.keySet()) {
+                    if (isMatch(li.subscriptionInfo.referenceSubscriptionIds, refSubsIds)) {
+                        li.subscriptionInfo.referenceSubscriptionIds = refSubsIds;
+                    }
+                }
+            }
+        }
+        for (LineItem li : orderlineItems) {
+            if (li.subscriptionInfo != null && li.state == 'CHARGED' && li.action == 'Switch' && String.isNotBlank(li.subscriptionInfo.referenceSubscriptionIds)) {
+                if (!refsubsIdsOliMap.containsKey(li.subscriptionInfo.referenceSubscriptionIds)) {
+                    refSubsIdsOrderLineItemMap.put(li.subscriptionInfo.referenceSubscriptionIds, li);
+                }
+                for (String refSubsId : TransactionEventTriggerHelperExtUtility.splitRefSubsIds(li.subscriptionInfo.referenceSubscriptionIds)) {
+                    if (subsIdOliMap.get(refSubsId) == null) {
+                        refSubsIdSet.add(refSubsId);
+                    }
+                }
+            }
+        }
+        Map<String, OpportunityLineItem> refSubsIdsOtherOpptySwitchOliMap = new Map<String, OpportunityLineItem>();
+        Map<String, OpportunityLineItem> refSubsIdOtherOpptyRenewalOliMap = new Map<String, OpportunityLineItem>();
+        if (refSubsIdsOrderLineItemMap.size() > 0 || refSubsIdSet.size() > 0) {
+            for (OpportunityLineItem oli : [
+                SELECT Id, Quantity, Comments__c, Line_License_Type__c, Product_Type__c, Payment_Method__c, Pricing_Method__c, End_Date__c, New_Term_End_Date__c, New_Term_Start_Date__c, Reference_Subscription_Ids__c, Contract_Line_Item__r.Pelican_Subscription_Id__c, OpportunityId, Line_Item_ATR__c, Line_Item_Action__c, Renewal_Status__c, Contract_Line_Item__r.Nurturing_Reseller__c, Contract_Line_Item__r.Nurturing_Lock_Date__c, Contract_Line_Item__r.Nurturing_Reseller__r.Account_CSN__c, BE_Nurture_Reseller__c
+                FROM OpportunityLineItem
+                WHERE OpportunityId != :opp.Id AND ((Opportunity.AccountId = :opp.AccountId AND Reference_Subscription_Ids__c != NULL AND Renewal_Status__c IN ('Open', 'Renewed') AND Line_Item_Action__c = 'Switch') OR (Contract_Line_Item__r.Pelican_Subscription_Id__c IN :refSubsIdSet AND (Renewal_Status__c = 'Open' OR Renewal_Status__c = 'End of Renewal') AND Line_Item_Action__c = 'Renewal'))
+            ]) {
+                if (String.isNotBlank(oli.Reference_Subscription_Ids__c) && oli.Line_Item_Action__c == 'Switch' && (oli.Renewal_Status__c == 'Open' || oli.Renewal_Status__c == 'Renewed')) {
+                    for (String refSubsIds : refSubsIdsOrderLineItemMap.keySet()) {
+                        if (isMatch(oli.Reference_Subscription_Ids__c, refSubsIds)) {
+                            refSubsIdsOtherOpptySwitchOliMap.put(oli.Reference_Subscription_Ids__c, oli);
+                            refSubsIdsOrderLineItemMap.get(refSubsIds).subscriptionInfo.referenceSubscriptionIds = oli.Reference_Subscription_Ids__c;
+                        }
+                    }
+                } else if (String.isNotBlank(oli.Contract_Line_Item__r.Pelican_Subscription_Id__c) && oli.Line_Item_Action__c == 'Renewal' && (oli.Renewal_Status__c == 'Open' || oli.Renewal_Status__c == 'End of Renewal')) {
+                    refSubsIdOtherOpptyRenewalOliMap.put(oli.Contract_Line_Item__r.Pelican_Subscription_Id__c, oli);
+                }
+            }
+        }
+        System.debug('refSubsIdsOtherOpptySwitchOliMap : ' + refSubsIdsOtherOpptySwitchOliMap);
+        System.debug('refSubsIdOtherOpptyRenewalOliMap : ' + refSubsIdOtherOpptyRenewalOliMap);
+        Set<Id> otherOpptyIdsToBeUpdated = new Set<Id>();
+        if (sofOlisToUpdate.size() > 0) {
+            TransactionEventTriggerHelperExtUtility.processSofOlis(sofOlisToUpdate);
+        }
+        for (LineItem li : orderlineItems) {
+            if (li.subscriptionInfo != null && li.state == 'CHARGED') {
+                CloseOpptyIfRenewal = true;
+                //Setting the oppty line item status as 'Renewed' if line item action is Renewal/Extension/Switch Term
+                if ((li.action == 'Renewal' || li.action == 'Extension' || (li.action == 'Switch' && String.isBlank(li.subscriptionInfo.referenceSubscriptionId))) && subsIdOliMap.get(li.subscriptionInfo.subscriptionId) != null) {
+                    OpportunityLineItem oli = subsIdOliMap.get(li.subscriptionInfo.subscriptionId);
+                    renewalStatus = 'default';
+                    Date lineItemStartDate = li.subscriptionInfo.subscriptionPeriodStartDate != null ? Date.valueOf(li.subscriptionInfo.subscriptionPeriodStartDate.substringBefore('T')) : null;
+                    Date lineItemEndDate = li.subscriptionInfo.subscriptionPeriodEndDate != null ? Date.valueOf(li.subscriptionInfo.subscriptionPeriodEndDate.substringBefore('T')) : null;
+                    if ((lineItemStartDate == null && lineItemEndDate == null) || (oli.New_Term_Start_Date__c >= lineItemStartDate.addDays(-2) && oli.New_Term_Start_Date__c <= lineItemStartDate.addDays(2)) || (oli.New_Term_End_Date__c >= lineItemEndDate.addDays(-2) && oli.New_Term_End_Date__c <= lineItemEndDate.addDays(2))) {
+                        processOliUpdatesRenew(oli, li, order, opp, renewalStatus);
+                        processCliUpdatesRenew(oli);
+                    }
+                } else if (li.action == 'Switch' && String.isNotBlank(li.subscriptionInfo.referenceSubscriptionIds)) {
+                    hasSwitchAction = true;
+                    if (!refsubsIdsOliMap.containsKey(li.subscriptionInfo.referenceSubscriptionIds) && refSubsIdsOtherOpptySwitchOliMap.containsKey(li.subscriptionInfo.referenceSubscriptionIds)) {
+                        //Switch line item is not present in the current opportunity but it is present in another opportunity. Ignoring the line item. Closing will be handled by Transaction of Opportunity with the Switch Line Item
+                        continue;
+                    } else {
+                        OpportunityLineItem oli;
+                        Decimal switchFromATR = 0;
+                        Decimal switchFromQuantity = 0;
+                        //Deleting the renewal line items in the current opportunity or other opportunities
+                        for (String refSubsId : TransactionEventTriggerHelperExtUtility.splitRefSubsIds(li.subscriptionInfo.referenceSubscriptionIds)) {
+                            if (subsIdOliMap.get(refSubsId) != null) {
+                                oli = subsIdOliMap.get(refSubsId);
+                                if (oli.Line_Item_ATR__c != null) {
+                                    switchFromATR += oli.Line_Item_ATR__c;
+                                }
+                                switchFromQuantity += oli.Quantity;
+                                olisToDeleteMap.put(oli.Id, oli);
+                            }
+                            if (refSubsIdOtherOpptyRenewalOliMap.get(refSubsId) != null) {
+                                oli = refSubsIdOtherOpptyRenewalOliMap.get(refSubsId);
+                                if (oli.Line_Item_ATR__c != null) {
+                                    switchFromATR += oli.Line_Item_ATR__c;
+                                }
+                                switchFromQuantity += oli.Quantity;
+                                olisToDeleteMap.put(oli.Id, oli);
+                                otherOpptyIdsToBeUpdated.add(oli.OpportunityId);
+                            }
+                        }
+                        System.debug('li.subscriptionInfo.referenceSubscriptionIds : ' + li.subscriptionInfo.referenceSubscriptionIds);
+                        //Switch line item is present in the same opportunity. Setting it as Renewed
+                        if (refsubsIdsOliMap.containsKey(li.subscriptionInfo.referenceSubscriptionIds)) {
+                            oli = refsubsIdsOliMap.get(li.subscriptionInfo.referenceSubscriptionIds);
+                            renewalStatus = 'renewalStatusNull';
+                            oli.Line_Item_ATR__c = (switchFromATR != null && switchFromATR != 0) ? switchFromATR : null;
+                            oli.Quantity = switchFromQuantity != null ? switchFromQuantity : oli.Quantity > 0 ? oli.Quantity : 0;
+                            processOliUpdatesRenew(oli, li, order, opp, renewalStatus);
+                            processCliUpdatesRenew(oli);
+                        } else {
+                            //Switch line item is not present in any opportunity. Creating new Switch Line Item
+                            oliNewOfferingIdMap.put(li.id, li.offering.id);
+                            oliPriceBook2IdMap.put(li.id, opp.Pricebook2Id);
+                            oliCurrencyCodedMap.put(li.id, order.price.orderCurrency);
+                            OpportunityLineItem newOli = new OpportunityLineItem();
+                            if (oli != null) {
+                                oli.Line_Item_ATR__c = (switchFromATR != null && switchFromATR != 0) ? switchFromATR : null;
+                                oli.Quantity = switchFromQuantity != null ? switchFromQuantity : oli.Quantity > 0 ? oli.Quantity : 0;
+                            } else {
+                                newOli.Line_Item_ATR__c = (switchFromATR != null && switchFromATR != 0) ? switchFromATR : null;
+                            }
+                            mapSwitchProductLineItemAttributes(newOli, oli, opp, li, order);
+                            Id primaryOppId = TransactionEventTriggerHelperExtUtility.getPrimaryOppIdFromQuote(order);
+                            if (opp.Id != primaryOppId && primaryOppId != null) {
+                                newOli.OpportunityId = primaryOppId;
+                            }
+                            olisToCreateMap.put(li.id, newOli);
+                        }
+                    }
+                } else if (li.action == 'Switch' && String.isNotBlank(li.subscriptionInfo.referenceSubscriptionId)) {
+                    hasSwitchAction = true;
+                    //Handling Switch Product
+                    if (subsIdOliMap.get(li.subscriptionInfo.referenceSubscriptionId) != null) {
+                        OpportunityLineItem oli = subsIdOliMap.get(li.subscriptionInfo.referenceSubscriptionId);
+                        processMappingFields(oli, refsubsIdOliMap, li, opp, order);
+                    }
+                    if (refsubsIdOliMap.get(li.subscriptionInfo.referenceSubscriptionId) != null) {
+                        OpportunityLineItem oli = refsubsIdOliMap.get(li.subscriptionInfo.referenceSubscriptionId);
+                        renewalStatus = 'renewalStatusNull';
+                        processOliUpdatesRenew(oli, li, order, opp, renewalStatus);
+                        processCliUpdatesRenew(oli);
+                    }
+                } else if (li.action == 'True-up' && trueUpOliMap.size() > 0) {
+                    oliNewOfferingIdMap.put(li.id, li.offering.id);
+                    oliPriceBook2IdMap.put(li.id, opp.Pricebook2Id);
+                    oliCurrencyCodedMap.put(li.id, opp.CurrencyIsoCode);
+                    OpportunityLineItem newOli = new OpportunityLineItem();
+                    OpportunityLineItem existingOli;
+                    if (trueUpOliMap.size() > i) {
+                        existingOli = trueUpOliMap.values()[i];
+                    } else {
+                        existingOli = trueUpOliMap.values()[0];
+                    }
+                    TransactionEventTriggerHelperExtUtility.mapTrueUpLineItemAttributes(newOli, existingOli, opp, li, order);
+                    i++;
+                    olisToCreateMap.put(li.id, newOli);
+                    olisToDeleteMap.putAll(trueUpOliMap);
+                    trueUpsToUpdateMap.put(existingOli.True_Up__c, new True_Up__c(Id = existingOli.True_Up__c, True_Up_Down_Status__c = 'Completed'));
+                } else if ((li.action == 'New' || li.action == 'Co-term')) {
+                    String key = TransactionEventTriggerHelperExtUtility.getLineItemKey(li, newOliMap);
+                    if (key != '' && newOliMap.size() > 0 && newOliMap.containsKey(key) && newOliMap.get(key).size() > 0) {
+                        OpportunityLineItem oli = newOliMap.get(key).remove(0);
+
+                        mapNewLineItemAttributes(oli, li, opp, order);
+                        if (oli.SOF_Numbers__c != null) {
+                            sofLineItem = li;
+                        }
+                        olisToUpdateMap.put(oli.Id, oli);
+                    } else {
+                        if (!missingLineItemsToCreate.containsKey(li.id) && !olisToCreateMap.containsKey(li.id)) {
+                            missingLineItemsToCreate.put(li.id, li);
+                            sofLineItem = li;
+                            oliCreationNeeded = true;
+                        }
+                    }
+                } else if ((li.action == 'Mid-term switch')) {
+                    system.debug('in mid term switch');
+                    hasMidTermSwitchLineItems = true;
+                    sofLineItem = li;
+                    TransactionEventTriggerHelperExtUtility.processMidTermSwitchLines(refsubsIdsOliMap, li, order, subsIdOliMap);
+                    if ((!olisToCreateMap.containsKey(li.id) && (refsubsIdsOliMap.size() == 0 || !refsubsIdsOliMap.containsKey(li.subscriptionInfo.referenceSubscriptionIds))) || Test.isRunningTest()) {
+                        midTermCreationNeeded = true;
+                    }
+                } else if (li.action == 'Trade-in') {
+                    tradeInMap.put(li.subscriptionInfo.subscriptionId, li);
+                }
+            }
+        }
+        /*
+	Moved above if (sofOlisToUpdate.size() > 0) {
+            TransactionEventTriggerHelperExtUtility.processSofOlis(sofOlisToUpdate);
+        }*/
+        if (sofOlisToUpdate.size() > 0) {
+            hasMidTermSwitchLineItems = true;
+            processOppClosure = true;
+            for (OpportunityLineItem oli : TransactionEventTriggerHelperExtUtility.sofOliIdRecMap.values()) {
+                TransactionEventTriggerHelperExtUtility.populateNurtureReseller(oli, sofLineItem, order, TransactionEventTriggerHelperExtUtility.sofOliIdRecMap.size(), TransactionEventTriggerHelperExtUtility.sofOliIdRecMap, null, 'sofTradeInOli');
+            }
+        }
+        if (midTermCreationMap.size() > 0 && tradeInMap.size() > 0 && midTermCreationNeeded) {
+            for (OpportunityLineItem oli : [
+                SELECT
+                    Id,
+                    OpportunityId,
+                    ProductCode,
+                    Product_Type__c,
+                    Line_License_Type__c,
+                    Payment_Method__c,
+                    PriceBookEntryId,
+                    Quantity,
+                    Comments__c,
+                    Line_Item_Action__c,
+                    End_Date__c,
+                    New_Term_Start_Date__c,
+                    New_Term_End_Date__c,
+                    Renewal_Status__c,
+                    BE_Nurture_Reseller__c,
+                    Contract_Line_Item__c,
+                    Contract_Line_Item__r.Subscription_Currency_Code__c,
+                    Contract_Line_Item__r.Pelican_Subscription_Id__c,
+                    Contract_Line_Item__r.Nurturing_Reseller__c,
+                    Contract_Line_Item__r.Nurturing_Lock_Date__c,
+                    Contract_Line_Item__r.Nurturing_Reseller__r.Account_CSN__c,
+                    Contract_Line_Item__r.ServiceContractId,
+                    Contract_Line_Item__r.Opportunity__c,
+                    Reference_Subscription__r.Switch_To_Subscription__c,
+                    Contract_Line_Item__r.Switch_To_Subscription__c,
+                    Contract_Line_Item__r.RecordType.Name,
+                    Reference_Subscription__c,
+                    Reference_Subscription__r.Pelican_Subscription_Id__c,
+                    Reference_Subscription__r.Nurturing_Reseller__c,
+                    Reference_Subscription__r.Nurturing_Lock_Date__c,
+                    Reference_Subscription__r.Nurturing_Reseller__r.Account_CSN__c,
+                    Order_Number__c,
+                    Opportunity.PriceBook2Id,
+                    Opportunity.CurrencyIsoCode,
+                    True_Up__c,
+                    Product2Id__c,
+                    Product2.OfferingId__c,
+                    Term__c,
+                    Reference_Subscription_Ids__c,
+                    SOF_Numbers__c,
+                    Pricing_Method__c,
+                    Asset_Serial_Num__c,
+                    Line_Item_ATR__c,
+                    CurrencyIsoCode,
+                    Annual_Declared_Value__c,
+                    Intended_Usage_Discount__c,
+                    Intended_Usage_Discount_Amount__c,
+                    Business_Type_Discount__c,
+                    Business_Type_Discount_Amount__c,
+                    Partner_Discounts_Applied__c
+                FROM OpportunityLineItem
+                WHERE Contract_Line_Item__r.Pelican_Subscription_Id__c IN :tradeInMap.keySet()
+            ]) {
+                if (String.isNotBlank(oli.Contract_Line_Item__r.Pelican_Subscription_Id__c)) {
+                    pelSubsIdOlIMap.put(oli.Contract_Line_Item__r.Pelican_Subscription_Id__c, oli);
+                }
+            }
+            processMidTermSwitchLineitemsViaQuote(midTermCreationMap.values(), opp, order, tradeInMap, refsubsIdsOliMap);
+        }
+        if (tradeInMap.size() > 0 && pendingTradeInUpdates) {
+            TransactionEventTriggerHelperExtUtility.processTradeInLineItems(tradeInMap, oppLineItems, opp, subsIdOliMap, order, refsubsIdsOliMap);
+        }
+        if (missingLineItemsToCreate.size() > 0 && oliCreationNeeded == true) {
+            TransactionEventTriggerHelperExtUtility.createMissingOLIs(missingLineItemsToCreate.values(), opp, order);
+            /* Map<String, OpportunityLineItem> missingOlis = createMissingOLIs(missingLineItemsToCreate.values(), opp, order);
+            if (missingOlis.size() > 0) {
+                olisToCreateMap.putAll(missingOlis);
+            }*/
+        }
+        System.debug('otherOpptyIdsToBeUpdated : ' + otherOpptyIdsToBeUpdated);
+        if (otherOpptyIdsToBeUpdated.size() > 0) {
+            handleOtherOpptyUpdateInCaseOfSwitch(otherOpptyIdsToBeUpdated);
+        }
+        Boolean allLineItemsClosed = true;
+        Boolean allLineItemsSwitched = true;
+        Boolean allLineItemsDeleted = true;
+        Boolean closeMTSOtherOpp = false;
+        Boolean closeMTSOtherOppTemp = false;
+        for (OpportunityLineItem oli : oppLineItems) {
+            if (opp.CurrencyISOCode != order.price.orderCurrency && (oli.Renewal_Status__c == 'Open' || oli.Renewal_Status__c == null) && !olisToDeleteMap.containsKey(oli.Id)) {
+                partialOlisIdSet.add(oli.Id);
+            }
+        }
+        for (OpportunityLineItem oli : oppLineItems) {
+            TransactionEventTriggerHelperExtUtility.processOrderCurrency(opp, order, isPartialRenewal);
+        }
+        if (partialOlisIdSet.size() > 0) {
+            oliIdMap = TransactionEventTriggerHelperUtility.getAllOliFields(partialOlisIdSet, oliIdMap);
+        }
+        List<SBQQ__Quote__c> validQute = TransactionEventTriggerHelperExtUtility.getQuoteValidOpp(opp, order);
+        List<OpportunityLineItem> openLineItemsList = new List<OpportunityLineItem>();
+        if (oppLineItems.size() > 0) {
+            for (OpportunityLineItem oli : oppLineItems) {
+                if ((oli.Renewal_Status__c == 'Open' || oli.Renewal_Status__c == null || oli.Renewal_Status__c =='End of Renewal' ) && !olisToDeleteMap.containsKey(oli.Id)) {
+                    TransactionEventTriggerHelperExtUtility.processOrderCurrencyOlis(oli, order, opp, isPartialRenewal);
+                    allLineItemsClosed = false;
+                    allLineItemsDeleted = false;
+                    closeMTSOtherOppTemp = false;
+                    hasOpenLineItems = true;
+                    openLineItemsList.add(oli);
+                    if (hasMidTermSwitchLineItems && !(validQute.size() > 0) && tradeInMap.containsKey(oli.Contract_Line_Item__r.Pelican_Subscription_Id__c)) {
+                        closeMTSOtherOpp = true;
+                        closeMTSOtherOppTemp = true;
+                    }
+                }
+                if ((oli.Line_Item_Action__c == 'New' || oli.Line_Item_Action__c == 'Co-term') && hasMidTermSwitchLineItems && (oli.Renewal_Status__c == 'Open' || oli.Renewal_Status__c == null) && !olisToUpdateMap.containsKey(oli.Id)) {
+                    olisToDeleteMap.put(oli.Id, oli);
+                }
+                if (oli.Line_Item_Action__c != 'Switch' && (!olisToDeleteMap.containsKey(oli.Id) || (olisToDeleteMap.containsKey(oli.Id) && oli.Opportunity.CurrencyISOCode != order.price.orderCurrency))) {
+                    allLineItemsSwitched = false;
+                }
+                if (oli.Line_Item_Action__c != 'Renewal' && !olisToDeleteMap.containsKey(oli.Id)) {
+                    allLineItemsDeleted = false;
+                }
+            }
+            //&& validQute.size() > 0
+            if (hasOpenLineItems && !hasMidTermSwitchLineItems ) {
+                TransactionEventTriggerHelperExtUtility.createNewOpptyForOpenLineItems(opp, order, openLineItemsList);
+            }
+            if (allLineItemsDeleted && !opptiesToUpdateMap.containsKey(opp.Id) && hasSwitchAction) {
+                opptiesToUpdateMap.put(opp.Id, new Opportunity(Id = opp.Id, StageName = 'Closed/Lost', Actual_Close_Date__c = system.today(), Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE, Sub_Reason__c = 'Switch'));
+            }
+            if (allLineItemsClosed || (CloseOpptyIfRenewal && validQute.size() > 0) || hasOpenLineItems) {
+                opp.StageName = 'Won';
+                opp.Actual_Close_Date__c = system.today(); //DAASN - 25878
+                opp.Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE;
+                subscriptionOpportunityIds.add(opp.Id); //DAASN-25492
+                opp.Forecast_Category__c = 'Closed Won';
+                if (allLineItemsSwitched || (hasMidTermSwitchLineItems && validQute.size() > 0)) {
+                    opp.Sub_Reason__c = 'Switch';
+                }
+                opptiesToUpdateMap.put(opp.Id, opp);
+            }
+            if ((!allLineItemsClosed && hasMidTermSwitchLineItems && processOppClosure && validQute.size() > 0 )|| hasOpenLineItems) {
+                opp.StageName = 'Won';
+                opp.Actual_Close_Date__c = system.today(); //DAASN - 25878
+                opp.Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE;
+                opp.Forecast_Category__c = 'Closed Won';
+                opp.Sub_Reason__c = 'Switch';
+                subscriptionOpportunityIds.add(opp.Id); //DAASN-25492
+                opptiesToUpdateMap.put(opp.Id, opp);
+                processOppClosure = false;
+            }
+            if (closeMTSOtherOpp && closeMTSOtherOppTemp) {
+                opptiesToUpdateMap.put(opp.Id, new Opportunity(Id = opp.Id, StageName = 'Closed/Lost', Actual_Close_Date__c = system.today(), Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE, Sub_Reason__c = 'Switch'));
+            }
+        } else {
+            opptiesToUpdateMap.put(opp.Id, new Opportunity(Id = opp.Id, StageName = 'Closed/Lost', Actual_Close_Date__c = system.today(), Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE, Sub_Reason__c = 'Switch'));
+        }
+    }
+
+    public static Boolean isMatch(String subsIdList1, String subsIdList2) {
+        Set<String> subsIdSet1Set = new Set<String>(TransactionEventTriggerHelperExtUtility.splitRefSubsIds(subsIdList1));
+        Set<String> subsIdSet2Set = new Set<String>(TransactionEventTriggerHelperExtUtility.splitRefSubsIds(subsIdList2));
+        return subsIdSet1Set.containsAll(subsIdSet2Set) && subsIdSet2Set.containsAll(subsIdSet1Set);
+    }
+
+    public static void handleOtherOpptyUpdateInCaseOfSwitch(Set<Id> opptyIds) {
+        Map<Id, List<OpportunityLineItem>> opptyIdOliMap = new Map<Id, List<OpportunityLineItem>>();
+        for (OpportunityLineItem oli : [SELECT Id, Renewal_Status__c, OpportunityId FROM OpportunityLineItem WHERE OpportunityId IN :opptyIds AND Id NOT IN :olisToDeleteMap.keySet() AND Opportunity.IsClosed = FALSE]) {
+            if (opptyIdOliMap.containsKey(oli.OpportunityId)) {
+                opptyIdOliMap.get(oli.OpportunityId).add(oli);
+            } else {
+                opptyIdOliMap.put(oli.OpportunityId, new List<OpportunityLineItem>{ oli });
+            }
+        }
+        Integer openCount = 0;
+        Integer closedCount = 0;
+        for (Id opptyId : opptyIds) {
+            if (opptyIdOliMap.get(opptyId) != null) {
+                for (OpportunityLineItem oli : opptyIdOliMap.get(opptyId)) {
+                    if (oli.Renewal_Status__c == 'Open') {
+                        openCount += 1;
+                    } else if (oli.Renewal_Status__c == 'Renewed' || oli.Renewal_Status__c == 'Completed') {
+                        closedCount += 1;
+                    }
+                }
+                if (openCount == 0) {
+                    if (closedCount > 0) {
+                        opptiesToUpdateMap.put(opptyId, new Opportunity(Id = opptyId, StageName = 'Won', Actual_Close_Date__c = system.today(), Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE, Forecast_Category__c = 'Closed Won'));
+                    } else {
+                        opptiesToUpdateMap.put(opptyId, new Opportunity(Id = opptyId, StageName = 'Closed/Lost', Actual_Close_Date__c = system.today(), Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE, Sub_Reason__c = 'Switch'));
+                    }
+                }
+            } else {
+                opptiesToUpdateMap.put(opptyId, new Opportunity(Id = opptyId, StageName = 'Closed/Lost', Actual_Close_Date__c = system.today(), Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE, Sub_Reason__c = 'Switch'));
+            }
+        }
+    }
+
+    public static void processOliUpdatesRenew(OpportunityLineItem oli, LineItem li, Order order, Opportunity opp, String renewalStatus) {
+        if ((oli.Renewal_Status__c == 'Open' && renewalStatus == 'default') || ((oli.Renewal_Status__c == 'Open' || oli.Renewal_Status__c == null) && renewalStatus == 'renewalStatusNull')) {
+            if (isPartialRenewal == true && oli.Opportunity.CurrencyISOCode != order.price.orderCurrency) {
+                serviceContractId = oli.Contract_Line_Item__r.ServiceContractId;
+                olisToDeleteMap.put(oli.Id, oli);
+                setLineItemAsRenewed(oli, li, order);
+                oliNewOfferingIdMap.put(li.id, li.offering.id);
+                oliPriceBook2IdMap.put(li.id, opp.Pricebook2Id);
+                oliCurrencyCodedMap.put(li.id, order.price.orderCurrency);
+                OpportunityLineItem newOli = new OpportunityLineItem();
+                //newOli = oliIdMap.get(oli.Id).clone( false, true, true, true );
+                newOli.Contract_Line_Item__c = oli.Contract_Line_Item__c;
+                mapSwitchProductLineItemAttributes(newOli, oli, opp, li, order);
+                newOli.Line_Item_ATR__c = (oli.Line_Item_ATR__c != null && oli.Line_Item_ATR__c != 0) ? TransactionEventTriggerHelperExtUtility.convertCurrency(oli.CurrencyIsoCode, order.price.orderCurrency, (Double) oli.Line_Item_ATR__c) : null;
+                newOli.Annual_Declared_Value__c = oli.Annual_Declared_Value__c != null ? TransactionEventTriggerHelperExtUtility.convertCurrency(oli.CurrencyIsoCode, order.price.orderCurrency, (Double) oli.Annual_Declared_Value__c) : 0;
+                //mapAtrFields(newOli, li.price);
+                olisToCreateMap.put(li.id, newOli);
+            } else if (oli.Opportunity.CurrencyISOCode != order.price.orderCurrency) {
+                oliNewOfferingIdMap.put(li.id, li.offering.id);
+                oliPriceBook2IdMap.put(li.id, opp.Pricebook2Id);
+                oliCurrencyCodedMap.put(li.id, order.price.orderCurrency);
+                OpportunityLineItem newOli = new OpportunityLineItem();
+                newOli.Contract_Line_Item__c = oli.Contract_Line_Item__c;
+                mapSwitchProductLineItemAttributes(newOli, oli, opp, li, order);
+                newOli.Line_Item_ATR__c = (oli.Line_Item_ATR__c != null && oli.Line_Item_ATR__c != 0) ? TransactionEventTriggerHelperExtUtility.convertCurrency(oli.CurrencyIsoCode, order.price.orderCurrency, (Double) oli.Line_Item_ATR__c) : null;
+                newOli.Annual_Declared_Value__c = oli.Annual_Declared_Value__c != null ? TransactionEventTriggerHelperExtUtility.convertCurrency(oli.CurrencyIsoCode, order.price.orderCurrency, (Double) oli.Annual_Declared_Value__c) : 0;
+                //mapAtrFields(newOli, li.price);
+                olisToCreateMap.put(li.id, newOli);
+                olisToDeleteMap.put(oli.Id, oli);
+            } else {
+                setLineItemAsRenewed(oli, li, order);
+                olisToUpdateMap.put(oli.Id, oli);
+            }
+        }
+    }
+    public static void processCliUpdatesRenew(OpportunityLineItem oli) {
+        if (oli.Contract_Line_Item__c != null) {
+            ContractLineItem cliToUpdate = new ContractLineItem();
+            cliToUpdate.Id = oli.Contract_Line_Item__c;
+            if (oli.Contract_Line_Item__r.Recordtype.Name == 'ODM' && oli.Contract_Line_Item__r.Nurturing_Reseller__c != null && !cliListToUpdate.contains(cliToUpdate)) {
+                cliToUpdate.Nurturing_Reseller__c = null;
+                cliToUpdate.Nurturing_Lock_Date__c = null;
+                cliListToUpdate.add(cliToUpdate);
+            }
+        }
+    }
+    public static void processMappingFields(OpportunityLineItem oli, Map<String, OpportunityLineItem> refsubsIdOliMap, LineItem li, Opportunity opp, Order order) {
+        if (oli.Renewal_Status__c == 'Open') {
+            //Line Item with action 'Switch' also exists, so just deleting Renewal Line Item. Switch Line Item will be updated in the next block
+            if (refsubsIdOliMap.get(li.subscriptionInfo.referenceSubscriptionId) != null) {
+                olisToDeleteMap.put(oli.Id, oli);
+            } else {
+                //Line Item with action 'Switch' doesn't exist. So replacing Renewal Line Item with Switch Line Item.
+                //Maps required for PriceBookEntry setting on the new Switch Line Item
+                oliNewOfferingIdMap.put(li.id, li.offering.id);
+                oliPriceBook2IdMap.put(li.id, opp.Pricebook2Id);
+                oliCurrencyCodedMap.put(li.id, order.price.orderCurrency);
+                OpportunityLineItem newOli = new OpportunityLineItem();
+                mapSwitchProductLineItemAttributes(newOli, oli, opp, li, order);
+                olisToCreateMap.put(li.id, newOli);
+                olisToDeleteMap.put(oli.Id, oli);
+            }
+        }
+    }
+
+    public static void processMidTermSwitchLineitemsViaQuote(List<LineItem> lis, Opportunity opp, Order order, Map<String, LineItem> tradeInMap, Map<String, OpportunityLineItem> refsubsIdsOliMap) {
+        List<SBQQ__Quote__c> lsQuotes = TransactionEventTriggerHelperExtUtility.getQuoteValidOpp(opp, order);
+        if (lsQuotes.size() > 0) {
+            processOppClosure = true;
+            for (LineItem li : lis) {
+                oliNewOfferingIdMap.put(li.id, li.offering.id);
+                oliPriceBook2IdMap.put(li.id, opp.Pricebook2Id);
+                oliCurrencyCodedMap.put(li.id, order.price.orderCurrency);
+                OpportunityLineItem newOli = new OpportunityLineItem();
+                TransactionEventTriggerHelperExtUtility.mapMidTermM1SwitchLineItemAttributes(newOli, li, opp, order, tradeInMap.size(), pelSubsIdOlIMap);
+                olisToCreateMap.put(li.id, newOli);
+            }
+            for (String s : tradeInMap.keySet()) {
+                system.debug('pelSubsIdOlIMap>>>' + pelSubsIdOlIMap);
+                if (pelSubsIdOlIMap.get(s) != null && pelSubsIdOlIMap.get(s).OpportunityId != opp.Id) {
+                    oppIds.add(pelSubsIdOlIMap.get(s).OpportunityId);
+                    OpportunityLineItem newOli = new OpportunityLineItem();
+                    OpportunityLineItem oldOli = pelSubsIdOlIMap.get(s);
+                    oliNewOfferingIdMap.put(oldOli.Product2Id__c, oldOli.Product2.OfferingId__c);
+                    oliPriceBook2IdMap.put(oldOli.Product2Id__c, oldOli.Opportunity.PriceBook2Id);
+                    oliCurrencyCodedMap.put(oldOli.Product2Id__c, order.price.orderCurrency);
+                    newOli = oldOli.clone(false, true, true, true);
+                    newOli.Opportunity = opp;
+                    newOli.OpportunityId = opp.Id;
+                    newOli.Renewal_Status__c = 'Traded';
+                    newOli.Line_Item_Action__c = 'Trade-in';
+                    mapOfferAttributes(newOli, tradeInMap.get(s));
+                    mapPrice(newOli, (tradeInMap.get(s)).price);
+                    TransactionEventTriggerHelperExtUtility.populateNurtureReseller(newOli, tradeInMap.get(s), order, tradeInMap.size(), pelSubsIdOlIMap, null, 'tradeIn');
+                    olisToCreateMap.put(tradeInMap.get(s).id, newOli);
+                    olisToDeleteMap.put(oldOli.Id, oldOli);
+                    system.debug(olisToDeleteMap + 'olisToDeleteMap>>>>');
+                } else {
+                    OpportunityLineItem oldOliToUpdate = pelSubsIdOlIMap.get(s);
+                    oldOliToUpdate.Renewal_Status__c = 'Traded';
+                    oldOliToUpdate.Line_Item_Action__c = 'Trade-in';
+                    mapPrice(oldOliToUpdate, (tradeInMap.get(s)).price);
+                    TransactionEventTriggerHelperExtUtility.populateNurtureReseller(oldOliToUpdate, tradeInMap.get(s), order, tradeInMap.size(), pelSubsIdOlIMap, null, 'tradeIn');
+                    olisToUpdateMap.put(oldOliToUpdate.Id, oldOliToUpdate);
+                }
+            }
+            TransactionEventTriggerHelperExtUtility.processOliDeletionCliUpdateOnOpen(tradeInMap, opp, refsubsIdsOliMap, order);
+        } else {
+            for (LineItem li : lis) {
+                if (!olisToCreateMap.containsKey(li.Id)) {
+                    midTermCreationMap.remove(li.Id);
+                }
+            }
+        }
+    }
+    public static void processRefundNonPaymentChargedBack(List<LineItem> lineItems, Map<String, OpportunityLineItem> subsIdOliMap, Map<String, OpportunityLineItem> refsubsIdsOliMap, Map<String, List<OpportunityLineItem>> newOliMap, Opportunity opp, List<OpportunityLineItem> oppLineItems) {
+        for (LineItem li : lineItems) {
+            system.debug(li.subscriptionInfo.subscriptionId + 'extension1>>>>>>>>>');
+            system.debug(subsIdOliMap.get(li.subscriptionInfo.subscriptionId) + 'extension2>>>>>>');
+            system.debug(li.subscriptionInfo.referenceSubscriptionId + 'extension3>>>>>>>>');
+            if (li.subscriptionInfo != null && (li.state == 'REFUNDED' || li.state == 'CHARGED_BACK' || li.state == 'NON_PAYMENT')) {
+                if ((li.action == 'New' || li.action == 'Co-Term' || li.action == 'True-up' || li.action == 'Renewal' || li.action == 'Extension' || li.action == 'Switch') && subsIdOliMap.get(li.subscriptionInfo.subscriptionId) != null) {
+                    Date lineItemEndDate = Date.valueOf(li.subscriptionInfo.subscriptionNextRenewalDate.substringBefore('T'));
+                    OpportunityLineItem oli = subsIdOliMap.get(li.subscriptionInfo.subscriptionId);
+                    //Reopening the line item for the current term if the action is Renewal, Extension or Switch
+                    processRenewalExtensionSwitchLogic(lineItemEndDate, oli, li);
+                } else if (li.action == 'Switch' && String.isNotBlank(li.subscriptionInfo.referenceSubscriptionIds)) {
+                    //Handling Switch Product. Reopening the line item.
+                    /*if (refsubsIdOliMap.get(li.subscriptionInfo.referenceSubscriptionId) != null) {
+                        OpportunityLineItem oli = refsubsIdOliMap.get(li.subscriptionInfo.referenceSubscriptionId);
+                        processOliUpdates(oli);
+                    }*/
+                    if (refsubsIdsOliMap.get(li.subscriptionInfo.referenceSubscriptionIds) != null) {
+                        OpportunityLineItem oli = refsubsIdsOliMap.get(li.subscriptionInfo.referenceSubscriptionIds);
+                        processOliUpdates(oli);
+                    }
+                } else if ((li.action == 'New' || li.action == 'Co-term') && String.isNotBlank(li.subscriptionInfo.subscriptionId) && subsIdOliMap.get(li.subscriptionInfo.subscriptionId) == null) {
+                    String key = li.offering.code + '|' + li.offer.billingTerm;
+                    key = String.isNotBlank(li.subscriptionInfo.referenceSubscriptionId) ? key + '|' + li.subscriptionInfo.referenceSubscriptionId : key;
+                    key = String.isNotBlank(li.subscriptionInfo.subscriptionId) ? key + '|' + li.subscriptionInfo.subscriptionId : key;
+                    if (newOliMap.containsKey(key) && newOliMap.get(key).size() > 0) {
+                        OpportunityLineItem oli = newOliMap.get(key).remove(0);
+                        reopenLineItem(oli, null);
+                        olisToUpdateMap.put(oli.Id, oli);
+                    }
+                }
+            }
+        }
+        if (opp.StageName == 'Won') {
+            opp.StageName = 'Stage 1';
+            opp.Reason__c = null;
+            opp.Sub_Reason__c = null;
+            opp.Forecast_Category__c = null;
+            opptiesToUpdateMap.put(opp.Id, opp);
+        } else {
+            Boolean isOpptyStillValid = false;
+            for (OpportunityLineItem oli : oppLineItems) {
+                if (!olisToDeleteMap.containsKey(oli.Id) && oli.Renewal_Status__c == 'Open') {
+                    isOpptyStillValid = true;
+                } else {
+                    isOpptyStillValid = false;
+                }
+            }
+            if (!isOpptyStillValid) {
+                opp.StageName = 'Closed/Lost';
+                opp.Actual_Close_Date__c = system.today(); //DAASN-25878
+                opp.Reason__c = DROM_ConstantsUtility.AGREEMENT_UPDATE;
+                opp.Sub_Reason__c = DROM_ConstantsUtility.REASON_AUTO_CLOSE;
+                opptiesToUpdateMap.put(opp.Id, opp);
+                invalidOppsToDeleteSCO.add(opp.Id);
+            }
+        }
+    }
+    public static void processRenewalExtensionSwitchLogic(Date lineItemEndDate, OpportunityLineItem oli, LineItem li) {
+        if ((li.action == 'Renewal' || li.action == 'Extension' || li.action == 'Switch') && oli.Renewal_Status__c == 'Renewed') {
+            ContractLineItem cliRecord = subsIdCliMap.get(li.subscriptionInfo.subscriptionId);
+            List<ContractLineItem> tempClis = updateCliDetails(oli);
+            if (tempClis != null && tempClis.size() > 0) {
+                cliListToUpdate.addAll(tempClis);
+            }
+            reopenLineItem(oli, cliRecord);
+            if (cliRecord != null && oli.Contract_Line_Item__c != cliRecord.Id) {
+                oli.Contract_Line_Item__c = cliRecord.Id;
+                if (!cliListToUpdate.contains(cliRecord) && cliRecord.Opportunity__c != oli.OpportunityId) {
+                    cliRecord.Opportunity__c = oli.OpportunityId;
+                    cliListToUpdate.add(cliRecord);
+                }
+            }
+            olisToUpdateMap.put(oli.Id, oli);
+        } else if (oli.Renewal_Status__c == 'Open' && oli.Line_Item_Action__c == 'Renewal' && (oli.End_Date__c == lineItemEndDate || oli.End_Date__c == lineItemEndDate.addDays(-1))) {
+            //Deleting the line item for the new term. New term line item can be identified based on the End_Date__c
+            olisToDeleteMap.put(oli.Id, oli);
+        }
+    }
+    public static void processOliUpdates(OpportunityLineItem oli) {
+        if (oli.Renewal_Status__c == 'Renewed') {
+            List<ContractLineItem> tempClis = updateCliDetails(oli);
+            if (tempClis.size() > 0 && tempClis != null) {
+                cliListToUpdate.addAll(tempClis);
+            }
+            reopenLineItem(oli, null);
+            olisToUpdateMap.put(oli.Id, oli);
+        }
+    }
+    public static void setLineItemAsRenewed(OpportunityLineItem oli, LineItem li, Order order) {
+        oli.Partial_Renewal__c = ((oli.Actual_Seats__c != null ? oli.Actual_Seats__c : oli.Quantity) != Decimal.valueOf(li.quantity)) ? true : false;
+        oli.Unrenewed_Seats__c = ((oli.Actual_Seats__c != null ? oli.Actual_Seats__c : oli.Quantity) - Decimal.valueOf(li.quantity));
+        oli.Quantity = Decimal.valueOf(li.quantity);
+        oli.Renewal_Status__c = 'Renewed';
+        oli.Renewed_Quantity__c = Decimal.valueOf(li.quantity);
+        oli.Seats_Ref__c = Decimal.valueOf(li.quantity);
+        if (li.action == 'Switch' && oli.Line_Item_Action__c != 'Switch') {
+            oli.Line_Item_Action__c = 'Switch';
+            oli.New_Term_End_Date__c = Date.valueOf(li.subscriptionInfo.customerEndDate);
+            oli.New_Term_Start_Date__c = Date.valueOf(li.subscriptionInfo.customerStartDate);
+            oli.End_Date__c = oli.New_Term_Start_Date__c.addDays(-1);
+            mapOfferAttributes(oli, li);
+        }
+        if (li.action == 'Extension' && oli.Line_Item_Action__c != 'Extension') {
+            oli.Line_Item_Action__c = 'Extension';
+        }
+        mapPrice(oli, li.price);
+        oli.Order_Number__c = order.id;
+        if (order.opportunity != null) {
+            oli.Rep_Email_Id__c = order.opportunity.buyerAgentEmail;
+        }
+        if (li.action == 'Switch' && String.isNotBlank(li.subscriptionInfo.referenceSubscriptionIds)) {
+            oli.Asset_Serial_Num__c = li.subscriptionInfo.subscriptionId;
+            oli.Payment_Method__c = order.payment.paymentMethod;
+        }
+        oli.Order_Booking_Date__c = Date.valueOf(order.created.substringBefore('T'));
+        oli.Order_Charged_Date__c = orderChargeDate; //DAASN-25942
+
+        if (String.isNotBlank(li.subscriptionInfo.referenceSubscriptionIds)) {
+            List<String> oliRefs = TransactionEventTriggerHelperExtUtility.splitRefSubsIds(li.subscriptionInfo.referenceSubscriptionIds);
+            List<OpportunityLineItem> oliRefLst = TransactionEventTriggerHelperExtUtility.getRefSubsLines(oliRefs);
+            if (order.agentAccount != null && String.isNotBlank(order.agentAccount.accountCsn) && TransactionEventTriggerHelperExtUtility.nurtureRsllrsSWR.contains(order.agentAccount.accountCsn)) {
+                Account accountReference = new Account(Account_CSN__c = order.agentAccount.accountCsn);
+                oli.BE_Nurture_Reseller__r = accountReference;
+            } else if (order.agentAccount != null && String.isNotBlank(order.agentAccount.accountCsn) && !TransactionEventTriggerHelperExtUtility.nurtureRsllrsSWR.contains(order.agentAccount.accountCsn)) {
+                oli.BE_Nurture_Reseller__c = oliRefLst[0].Contract_Line_Item__r.Nurturing_Reseller__c;
+            } else if (order.agentAccount == null && oli != null && oli.Contract_Line_Item__r.Nurturing_Reseller__c != null) {
+                oli.BE_Nurture_Reseller__c = oli.Contract_Line_Item__r.Nurturing_Reseller__c;
+            }
+        } else {
+            if (oli.Contract_Line_Item__c != null && oli.Contract_Line_Item__r.Nurturing_Reseller__c != null) {
+                oli.BE_Nurture_Reseller__c = oli.Contract_Line_Item__r.Nurturing_Reseller__c;
+            } else if (oli.Contract_Line_Item__c == null) {
+                for (String refSubsId : TransactionEventTriggerHelperExtUtility.splitRefSubsIds(oli.Reference_Subscription_Ids__c)) {
+                    if (subsIdCliMap.containsKey(refSubsId) && subsIdCliMap.get(refSubsId).Nurturing_Reseller__c != null) {
+                        oli.BE_Nurture_Reseller__c = subsIdCliMap.get(refSubsId).Nurturing_Reseller__c;
+                    }
+                }
+            }
+            if (oli.BE_Nurture_Reseller__c == null && order.agentAccount != null && String.isNotBlank(order.agentAccount.accountCsn)) {
+                Account accountReference = new Account(Account_CSN__c = order.agentAccount.accountCsn);
+                oli.BE_Nurture_Reseller__r = accountReference;
+            }
+        }
+
+        /* To be uncommented in case of Error - NR - FALCONS
+       if (oli.Contract_Line_Item__c != null && oli.Contract_Line_Item__r.Nurturing_Reseller__c != null) {
+            oli.BE_Nurture_Reseller__c = oli.Contract_Line_Item__r.Nurturing_Reseller__c;
+        } else if (oli.Contract_Line_Item__c == null) {
+            for (String refSubsId : TransactionEventTriggerHelperExtUtility.splitRefSubsIds(oli.Reference_Subscription_Ids__c)) {
+                if (subsIdCliMap.containsKey(refSubsId) && subsIdCliMap.get(refSubsId).Nurturing_Reseller__c != null) {
+                    oli.BE_Nurture_Reseller__c = subsIdCliMap.get(refSubsId).Nurturing_Reseller__c;
+                }
+            }
+        }
+        if (oli.BE_Nurture_Reseller__c == null && order.agentAccount != null && String.isNotBlank(order.agentAccount.accountCsn)) {
+            Account accountReference = new Account(Account_CSN__c = order.agentAccount.accountCsn);
+            oli.BE_Nurture_Reseller__r = accountReference;
+        }To be uncommented in case of Error - NR - FALCONS */
+    }
+    private static void reopenLineItem(OpportunityLineItem oli, ContractLineItem cliRecord) {
+        oli.Renewal_Status__c = 'Open';
+        oli.Partial_Renewal__c = false;
+        oli.Unrenewed_Seats__c = 0;
+        oli.Renewed_Quantity__c = null;
+        oli.Order_Number__c = null;
+        oli.Rep_Email_Id__c = null;
+        oli.Order_Booking_Date__c = null;
+        oli.Order_Charged_Date__c = null; //DAASN-25942
+        oli.BE_Nurture_Reseller__c = null;
+        if (cliRecord != null && oli.Term__c != cliRecord.Term__c) {
+            if (cliRecord.Term__c == 'A01') {
+                oli.Term__c = 'Annual';
+                oli.Line_Item_Action__c = 'Renewal';
+            } else if (cliRecord.Term__c == 'A06') {
+                oli.Term__c = '3-Year';
+                oli.Line_Item_Action__c = 'Renewal';
+            }
+        }
+    }
+
+    public static void mapNewLineItemAttributes(OpportunityLineItem newOli, LineItem li, Opportunity opp, Order order) {
+        newOli.Quantity = Decimal.valueOf(li.quantity);
+        newOli.Renewal_Status__c = 'Completed';
+        mapOfferAttributes(newOli, li);
+        newOli.Asset_Serial_Num__c = li.subscriptionInfo.subscriptionId;
+        newOli.Order_Number__c = order.id;
+        mapPrice(newOli, li.price);
+        if (order.opportunity != null) {
+            newOli.Rep_Email_Id__c = order.opportunity.buyerAgentEmail;
+        }
+        newOli.Order_Booking_Date__c = Date.valueOf(order.created.substringBefore('T'));
+        newOli.Order_Charged_Date__c = orderChargeDate; //DAASN-25942
+        newoli.Pricing_Method__c = li.offer.pricingMethod;
+        newoli.Reference_Subscription_Ids__c = li.subscriptionInfo.referenceSubscriptionId;
+        if (newOli.SOF_Numbers__c != null) {
+            TransactionEventTriggerHelperExtUtility.populateNurtureReseller(newOli, li, order, TransactionEventTriggerHelperExtUtility.sofOliIdRecMap.size(), TransactionEventTriggerHelperExtUtility.sofOliIdRecMap, li.subscriptionInfo.subscriptionId, 'sofMidTermOli');
+        }
+    }
+
+    private static void mapSwitchProductLineItemAttributes(OpportunityLineItem newOli, OpportunityLineItem oli, Opportunity opp, LineItem li, Order order) {
+        newOli.OpportunityId = opp.Id;
+        newOli.Opportunity = opp;
+        newOli.Quantity = /*oli != null ? oli.Quantity : */ Decimal.valueOf(li.quantity);
+        newOli.Seats_Ref__c = Decimal.valueOf(li.quantity);
+        newOli.Partial_Renewal__c = (oli.quantity != Decimal.valueOf(li.quantity)) ? true : false;
+        newOli.Unrenewed_Seats__c = (oli.quantity - Decimal.valueOf(li.quantity));
+        //newOli.PriceBookEntryId = oli.PriceBookEntryId;
+        newOli.Renewal_Status__c = 'Renewed';
+        newOli.Renewed_Quantity__c = Decimal.valueOf(li.quantity);
+        if (String.isNotBlank(li.subscriptionInfo.referenceSubscriptionIds)) {
+            newOli.Reference_Subscription_Ids__c = li.subscriptionInfo.referenceSubscriptionIds;
+            List<String> oliRefs = TransactionEventTriggerHelperExtUtility.splitRefSubsIds(li.subscriptionInfo.referenceSubscriptionIds);
+            List<OpportunityLineItem> oliRefLst = TransactionEventTriggerHelperExtUtility.getRefSubsLines(oliRefs);
+            if (order.agentAccount != null && String.isNotBlank(order.agentAccount.accountCsn) && TransactionEventTriggerHelperExtUtility.nurtureRsllrsSWR.contains(order.agentAccount.accountCsn)) {
+                Account accountReference = new Account(Account_CSN__c = order.agentAccount.accountCsn);
+                newOli.BE_Nurture_Reseller__r = accountReference;
+            } else if (order.agentAccount != null && String.isNotBlank(order.agentAccount.accountCsn) && !TransactionEventTriggerHelperExtUtility.nurtureRsllrsSWR.contains(order.agentAccount.accountCsn)) {
+                newOli.BE_Nurture_Reseller__c = oliRefLst[0].Contract_Line_Item__r.Nurturing_Reseller__c;
+            } else if (order.agentAccount == null && oli != null && oli.Contract_Line_Item__r.Nurturing_Reseller__c != null) {
+                newOli.BE_Nurture_Reseller__c = oli.Contract_Line_Item__r.Nurturing_Reseller__c;
+            }
+        } else {
+            if (oli != null && oli.Contract_Line_Item__r.Nurturing_Reseller__c != null) {
+                newOli.BE_Nurture_Reseller__c = oli.Contract_Line_Item__r.Nurturing_Reseller__c;
+            } else if (order.agentAccount != null && String.isNotBlank(order.agentAccount.accountCsn)) {
+                Account accountReference = new Account(Account_CSN__c = order.agentAccount.accountCsn);
+                newOli.BE_Nurture_Reseller__r = accountReference;
+            }
+        }
+        if (oli != null) {
+            newOli.Reference_Subscription__c = oli.Contract_Line_Item__c;
+        }
+        newOli.Comments__c = oli != null ? oli.Comments__c : '';
+        newOli.Line_Item_Action__c = li.action;
+        newOli.Line_License_Type__c = oli != null ? oli.Line_License_Type__c : SUBS_TransitionSubscriptionOpptyUtility.actionNameWithValue.get(li.action);
+        newOli.Product_Type__c = oli != null ? oli.Product_Type__c : 'Subscription';
+        newOli.Payment_Method__c = oli != null ? oli.Payment_Method__c : order.payment.paymentMethod;
+        newoli.Pricing_Method__c = oli != null ? oli.Pricing_Method__c : li.offer.pricingMethod;
+        newOli.New_Term_End_Date__c = oli != null ? oli.New_Term_End_Date__c : Date.valueOf(li.subscriptionInfo.subscriptionPeriodEndDate.substringBefore('T'));
+        newOli.New_Term_Start_Date__c = oli != null ? oli.New_Term_Start_Date__c : Date.valueOf(li.subscriptionInfo.subscriptionPeriodStartDate.substringBefore('T'));
+        newOli.End_Date__c = oli != null ? oli.End_Date__c : newOli.New_Term_Start_Date__c.addDays(-1);
+        newOli.Line_Item_ATR__c = oli != null ? oli.Line_Item_ATR__c : newOli.Line_Item_ATR__c != null ? newOli.Line_Item_ATR__c : null;
+        mapOfferAttributes(newOli, li);
+        newOli.Order_Number__c = order.id;
+        mapPrice(newOli, li.price);
+        if (order.opportunity != null) {
+            newOli.Rep_Email_Id__c = order.opportunity.buyerAgentEmail;
+        }
+        newOli.Order_Booking_Date__c = Date.valueOf(order.created.substringBefore('T'));
+        newOli.Order_Charged_Date__c = orderChargeDate; //DAASN-25942
+
+        newOli.Asset_Serial_Num__c = li.subscriptionInfo.subscriptionId;
+        /*if (li.subscriptionInfo != null && String.isNotBlank(li.subscriptionInfo.subscriptionId)) {
+            ContractLineItem newCli = new ContractLineItem(Pelican_Subscription_Id__c = li.subscriptionInfo.subscriptionId);
+            newOli.Contract_Line_Item__r = newCli;
+        }*/
+    }
+    public static void deleteServiceContractOpportunity(Set<Id> oppIds) {
+        List<Service_Contract_Opportunity__c> scoList = [SELECT Id, Opportunity__c, Service_Contract__c FROM Service_Contract_Opportunity__c WHERE Opportunity__c IN :oppIds AND Opportunity__r.StageName = 'Closed/Lost'];
+        try {
+            if (scoList.size() > 0) {
+                Database.DeleteResult[] delList = Database.delete(scoList, false);
+                system.debug(delList.size() + 'records deleted');
+            }
+        } catch (Exception e) {
+            System.debug('Error Message : <br/>' + e.getMessage() + ' - Line Number : ' + e.getLineNumber() + '<br/>' + 'Stack Trace : <br/>' + e.getStackTraceString());
+        }
+    }
+
+    public static List<ContractLineItem> updateCliDetails(OpportunityLineItem olItem) {
+        List<ContractLineItem> clisToUpdate = new List<ContractLineItem>();
+        ContractLineItem cliToUpdate;
+
+        if (olItem.Reference_Subscription_Ids__c != null) {
+            List<String> refsubsId = TransactionEventTriggerHelperExtUtility.splitRefSubsIds(olItem.Reference_Subscription_Ids__c);
+            for (ContractLineItem subscription : [SELECT Id, Opportunity__c, Pelican_Subscription_Id__c, Switch_To_Subscription__c FROM ContractLineItem WHERE Pelican_Subscription_Id__c IN :refsubsId AND Switch_To_Subscription__c != NULL]) {
+                cliToUpdate = new ContractLineItem();
+                cliToUpdate.Id = subscription.Id;
+                cliToUpdate.Switch_To_Subscription__c = null;
+                cliToUpdate.Opportunity__c = null;
+                clisToUpdate.add(cliToUpdate);
+            }
+        } else if (olItem.Contract_Line_Item__c != null) {
+            /*else {
+                return null;
+            }*/
+            cliToUpdate = new ContractLineItem();
+            cliToUpdate.Id = olItem.Contract_Line_Item__c;
+            cliToUpdate.Opportunity__c = olItem.OpportunityId;
+            cliToUpdate.Previous_Opportunity__c = null;
+            if (olItem.Contract_Line_Item__r.Nurturing_Reseller__c == null && olItem.BE_Nurture_Reseller__c != null) {
+                cliToUpdate.Nurturing_Reseller__c = olItem.BE_Nurture_Reseller__c;
+                cliToUpdate.Nurturing_Lock_Date__c = system.today();
+            }
+            clisToUpdate.add(cliToUpdate);
+        } /*else {
+            return null;
+        } */
+        return clisToUpdate;
+    }
+    //DAASN-25942 : Assigning value to Order Charged Date
+    private static Date processOrderOperations(List<Order> orderList) {
+        Date chargedDate;
+        for (Order order : orderList) {
+            if (order.orderOperations != null) {
+                for (OrderOperation ordOperation : order.orderOperations) {
+                    if (ordOperation.event == 'CHARGE') {
+                        chargedDate = Date.valueOf(ordOperation.created.substringBefore('T'));
+                        break;
+                    }
+                }
+            }
+        }
+        return chargedDate;
+    }
+    //CRMEAGLE-879 as below method even getting inovked from SUBS_GetOrderDetailsController
+    public static void processOrderUpdates(Map<String, Transaction__c> opptyIdTransactionMap, Map<String, Order> opptyIdOrderMap, Boolean logToUpdate) {
+        Savepoint sp = Database.setSavepoint();
+        try {
+            //Getting the latest valid Cli for Subscription ids in case of refund/non-payment. If the Oli is reopened, then Oli has to poin to the valid transitioned Cli
+            subsIdCliMap = new Map<String, ContractLineItem>();
+            Set<String> subsIds = new Set<String>();
+            for (Order order : opptyIdOrderMap.values()) {
+                if (order.orderState == 'REFUNDED' || order.orderState == 'NON_PAYMENT' || order.orderState == 'PARTIALLY_REFUNDED' || order.orderState == 'PARTIAL_NON_PAYMENT' || order.orderState == 'CHARGED_BACK' || order.orderState == 'PARTIAL_CHARGED_BACK' || order.orderState == 'Charged') {
+                    for (LineItem li : order.lineItems) {
+                        if (li.subscriptionInfo != null && (li.state == 'REFUNDED' || li.state == 'CHARGED_BACK' || li.state == 'NON_PAYMENT')) {
+                            if (String.isNotBlank(li.subscriptionInfo.subscriptionId)) {
+                                subsIds.add(li.subscriptionInfo.subscriptionId);
+                            }
+                            if (String.isNotBlank(li.subscriptionInfo.referenceSubscriptionId)) {
+                                subsIds.add(li.subscriptionInfo.referenceSubscriptionId);
+                            }
+                        }
+                        if (li.subscriptionInfo != null && li.state == 'CHARGED' && String.isNotBlank(li.subscriptionInfo.referenceSubscriptionIds)) {
+                            for (String refSubsId : TransactionEventTriggerHelperExtUtility.splitRefSubsIds(li.subscriptionInfo.referenceSubscriptionIds)) {
+                                subsIds.add(refSubsId);
+                            }
+                        }
+                    }
+                }
+            }
+            if (subsIds.size() > 0) {
+                for (ContractLineItem cli : [SELECT Id, Opportunity__c, Pelican_Subscription_Id__c, Switch_To_Subscription__c, Term__c, Nurturing_Reseller__c, Nurturing_Lock_Date__c, Recordtype.Name FROM ContractLineItem WHERE Pelican_Subscription_Id__c IN :subsIds ORDER BY Actual_End_Date__c]) {
+                    subsIdCliMap.put(cli.Pelican_Subscription_Id__c, cli);
+                }
+            }
+            List<OpportunityLineItem> oppLineItems = [
+                SELECT
+                    Id,
+                    OpportunityId,
+                    ProductCode,
+                    Product_Type__c,
+                    Line_License_Type__c,
+                    Payment_Method__c,
+                    PriceBookEntryId,
+                    Partial_Renewal__c,
+                    Unrenewed_Seats__c,
+                    Seats_Ref__c,
+                    Quantity,
+                    Actual_Seats__c,
+                    Comments__c,
+                    Line_Item_Action__c,
+                    End_Date__c,
+                    New_Term_Start_Date__c,
+                    New_Term_End_Date__c,
+                    Renewal_Status__c,
+                    BE_Nurture_Reseller__c,
+                    Contract_Line_Item__c,
+                    Contract_Line_Item__r.Subscription_Currency_Code__c,
+                    Contract_Line_Item__r.Pelican_Subscription_Id__c,
+                    Contract_Line_Item__r.Nurturing_Reseller__c,
+                    Contract_Line_Item__r.Nurturing_Lock_Date__c,
+                    Contract_Line_Item__r.ServiceContractId,
+                    Contract_Line_Item__r.Opportunity__c,
+                    Reference_Subscription__r.Switch_To_Subscription__c,
+                    Contract_Line_Item__r.Switch_To_Subscription__c,
+                    Contract_Line_Item__r.RecordType.Name,
+                    Contract_Line_Item__r.Nurturing_Reseller__r.Account_CSN__c,
+                    Reference_Subscription__c,
+                    Reference_Subscription__r.Pelican_Subscription_Id__c,
+                    Reference_Subscription__r.Nurturing_Reseller__c,
+                    Reference_Subscription__r.Nurturing_Lock_Date__c,
+                    Reference_Subscription__r.Nurturing_Reseller__r.Account_CSN__c,
+                    Order_Number__c,
+                    Opportunity.PriceBook2Id,
+                    Opportunity.CurrencyIsoCode,
+                    True_Up__c,
+                    Product2Id__c,
+                    Product2.OfferingId__c,
+                    Term__c,
+                    Reference_Subscription_Ids__c,
+                    SOF_Numbers__c,
+                    Pricing_Method__c,
+                    Asset_Serial_Num__c,
+                    Line_Item_ATR__c,
+                    CurrencyIsoCode,
+                    Annual_Declared_Value__c
+                FROM OpportunityLineItem
+                WHERE OpportunityId IN :opptyIdTransactionMap.keySet()
+            ];
+            for (Opportunity opp : [SELECT Id, StageName, PriceBook2Id, Opportunity_Number__c, CurrencyIsoCode, AccountId FROM Opportunity WHERE Id IN :opptyIdTransactionMap.keySet()]) {
+                Order order = opptyIdOrderMap.get(opp.Id);
+                if (order.opportunity != null && order.opportunity.id == opp.Opportunity_Number__c) {
+                    OpportunityLineItemTriggerServices.skipDDAUpdates = true;
+                }
+                Map<String, OpportunityLineItem> subsIdOliMap = new Map<String, OpportunityLineItem>();
+                Map<String, OpportunityLineItem> refsubsIdOliMap = new Map<String, OpportunityLineItem>();
+                Map<String, OpportunityLineItem> refsubsIdsOliMap = new Map<String, OpportunityLineItem>();
+                Map<Id, OpportunityLineItem> trueUpOliMap = new Map<Id, OpportunityLineItem>();
+                Map<String, List<OpportunityLineItem>> newOliMap = new Map<String, List<OpportunityLineItem>>();
+
+                for (OpportunityLineItem oli : oppLineItems) {
+                    if (String.isNotBlank(oli.Contract_Line_Item__r.Pelican_Subscription_Id__c) && (oli.Line_Item_Action__c == 'Renewal' || oli.Line_Item_Action__c == 'Switch' || oli.Line_Item_Action__c == 'Extension' || oli.Line_Item_Action__c == 'Trade-in')) {
+                        subsIdOliMap.put(oli.Contract_Line_Item__r.Pelican_Subscription_Id__c, oli);
+                    }
+                    if (String.isNotBlank(oli.Reference_Subscription__r.Pelican_Subscription_Id__c) && oli.Line_Item_Action__c == 'Switch') {
+                        refsubsIdOliMap.put(oli.Reference_Subscription__r.Pelican_Subscription_Id__c, oli);
+                    }
+                    if (String.isNotBlank(oli.Reference_Subscription_Ids__c) && (oli.Line_Item_Action__c == 'Mid-term switch' || oli.Line_Item_Action__c == 'Switch')) {
+                        refsubsIdsOliMap.put(oli.Reference_Subscription_Ids__c, oli);
+                        if (String.isNotBlank(oli.SOF_Numbers__c)) {
+                            List<String> sofOlisLst = TransactionEventTriggerHelperExtUtility.splitRefSubsIds(oli.SOF_Numbers__c);
+                            sofOlisToUpdate = new Set<String>(sofOlisLst);
+                        }
+                    } else if (oli.Line_Item_Action__c == 'True-up') {
+                        trueUpOliMap.put(oli.Id, oli);
+                        if (oli.Quantity < 0 && oli.Renewal_Status__c == 'Open') {
+                            olisToDeleteMap.put(oli.Id, oli);
+                        }
+                    } else if (String.isBlank(oli.Contract_Line_Item__c) && ((oli.Line_Item_Action__c == 'New' && String.isBlank(oli.Reference_Subscription__c)) || ((oli.Line_Item_Action__c == 'Co-term' && String.isNotBlank(oli.Reference_Subscription__c))))) {
+                        String key = TransactionEventTriggerHelperExtUtility.getNewOliKey(oli);
+                        if (newOliMap.containsKey(key)) {
+                            newOliMap.get(key).add(oli);
+                        } else {
+                            newOliMap.put(key, new List<OpportunityLineItem>{ oli });
+                        }
+                        if (String.isNotBlank(oli.SOF_Numbers__c)) {
+                            oli.Renewal_Status__c = 'Completed';
+                            olisToUpdateMap.put(oli.Id, oli);
+                            List<String> sofOlisLst = TransactionEventTriggerHelperExtUtility.splitRefSubsIds(oli.SOF_Numbers__c);
+                            sofOlisToUpdate = new Set<String>(sofOlisLst);
+                        }
+                    }
+                }
+                system.debug(sofOlisToUpdate + 'sofOlisToUpdate>>>');
+                system.debug(refsubsIdsOliMap + 'refsubsIdsOliMap>>>');
+                if (order.orderState == 'Charged') {
+                    processOrderCharged(order.lineItems, subsIdOliMap, refsubsIdOliMap, refsubsIdsOliMap, trueUpOliMap, newOliMap, opp, order, oppLineItems);
+                }
+                if (order.orderState == 'REFUNDED' || order.orderState == 'NON_PAYMENT' || order.orderState == 'PARTIALLY_REFUNDED' || order.orderState == 'PARTIAL_NON_PAYMENT' || order.orderState == 'CHARGED_BACK' || order.orderState == 'PARTIAL_CHARGED_BACK') {
+                    processRefundNonPaymentChargedBack(order.lineItems, subsIdOliMap, refsubsIdsOliMap, newOliMap, opp, oppLineItems);
+                }
+            }
+            TransactionEventTriggerHelperExtUtility.updateSalesOpportunity(subscriptionOpportunityIds); //DAASN-25492
+            TransactionEventTriggerHelperUtility.performDatabaseOperations(opptyIdTransactionMap, opptyIdOrderMapTemp, logToUpdate);
+        } catch (Exception e) {
+            Database.rollback(sp); // Rollback to the savepoint in case of an error
+            ExceptionHandler.logException(new Exception__c(Class__c = 'TransactionEventTriggerHelper', Method__c = 'processOrder', Message__c = e.getMessage() + ' - ' + e.getStackTraceString()));
+            if (opptyIdTransactionMap.size() > 0) {
+                for (Transaction__c tx : opptyIdTransactionMap.values()) {
+                    if (opptyIdOrderMap.get(tx.Opportunity__c) != null) {
+                        tx.Log__c = logToUpdate ? Json.serializePretty(opptyIdOrderMap.get(tx.Opportunity__c)) : null;
+                    }
+                    tx.Status__c = 'Failed';
+                    tx.Error__c = e.getMessage() + ' - ' + e.getStackTraceString();
+                }
+                update opptyIdTransactionMap.values();
+            }
+        }
+    }
+    public static void subsOpptyUpdatesForAccountMerge(List<Transactions__e> txnEventGenricLst) {
+        Map<string, string> vicSubIdsWithSurvivorAccountIdMap = new Map<String, String>();
+        Map<string, string> vicSubIdsWithSurvivorAccountCsnMap = new Map<String, String>();
+        //Map<Id, Opportunity> updateSubOppMap = new Map<Id, Opportunity>(); //Commented for DAASN-22133
+        //List<OpportunityLineItem> oliToInsert = new List<OpportunityLineItem>(); //Commented for DAASN-22133
+        //Map<Id, OpportunityLineItem> oliToDelete = new Map<Id, OpportunityLineItem>(); //Commented for DAASN-22133
+        Map<String, Opportunity> oppSurvivorRecWithKey = new Map<String, Opportunity>();
+        //Map<Id, Id> victimOppIdWithSurvivorIdMap = new Map<Id, Id>();
+        Map<Id, String> victimCliWithNewKeyMap = new Map<Id, String>();
+        //Set<Id> victimOpptyIdSet = new Set<Id>();
+        Set<String> victimOppIds = new Set<String>();
+        //Set<String> survOpenActionKeySet = new Set<String>(); //Commented for DAASN-22133
+        //List<SBQQ__Quote__c> quotesToUpdateList = new List<SBQQ__Quote__c>(); //Commented for DAASN-22133
+        //List<Customer_Initiatives__c> actionsToUpdateList = new List<Customer_Initiatives__c>(); //Commented for DAASN-22133
+        List<Transaction__c> txnLst = new List<Transaction__c>();
+        List<Transaction__c> txnLstUpdated = new List<Transaction__c>();
+        List<Opportunity> victimOppList = new List<Opportunity>();
+        List<String> allowedDDAStatus = new List<String>{ 'Rejected', 'Expired', 'Not Submitted' }; //Commented for DAASN-22133
+        //List<String> nonEligibleQuotes = new List<String>{ 'Expired', 'Cancelled', 'Ordered', 'Order Submitted' }; //DAASN-22133
+        //list<String> migrateActionStatus = System.Label.MigrateActionStatus.split(';'); //Commented for DAASN-22133
+        String newkeyForVictim;
+        Boolean isError = false;
+
+        try {
+            for (Transactions__e txn : txnEventGenricLst) {
+                txnLst = (List<Transaction__c>) JSON.deserialize(txn.Details__c, List<Transaction__c>.class);
+                txnLstUpdated.addAll(txnLst);
+            }
+
+            for (Transaction__c txnRecord : (List<Transaction__c>) txnLstUpdated) {
+                if (txnRecord.Change_Type__c == 'Account Merge') {
+                    vicSubIdsWithSurvivorAccountIdMap.put((((txnRecord.Log__c).split(';')[0]).split('-')[1]), (((txnRecord.Log__c).split(';')[1]).split('-')[1]));
+                    vicSubIdsWithSurvivorAccountCsnMap.put((((txnRecord.Log__c).split(';')[0]).split('-')[1]), (((txnRecord.Log__c).split(';')[2]).split('-')[1]));
+                }
+            }
+            System.debug('vicSubIdsWithSurvivorAccountIdMap**' + vicSubIdsWithSurvivorAccountIdMap);
+            System.debug('vicSubIdsWithSurvivorAccountCsnMap**' + vicSubIdsWithSurvivorAccountCsnMap);
+
+            //MDM_Merge_Rule__mdt subsOpptyMdt = MDM_Merge_Rule__mdt.getInstance('Subscription_Opportunitites');
+            MDM_Merge_Rule__mdt subsOpptyMdt = [SELECT Id, Query__c FROM MDM_Merge_Rule__mdt WHERE DeveloperName = 'Subscription_Opportunitites' LIMIT 1];
+            String queryFilter = String.isNotBlank(subsOpptyMdt.Query__c) ? subsOpptyMdt.Query__c : null;
+
+            if (queryFilter != null) {
+                //get the survivor opportunity key details
+                Set<String> survivorAcctIds = new Set<String>(vicSubIdsWithSurvivorAccountIdMap.values());
+                victimOppIds = vicSubIdsWithSurvivorAccountIdMap.keySet();
+                System.debug('**survivorAcctIds**' + survivorAcctIds);
+                System.debug('**allowedDDAStatus**' + allowedDDAStatus);
+
+                String survivorOppQuery = queryFilter + ' AND Id NOT IN:victimOppIds AND AccountId IN : survivorAcctIds AND (Discount_Approval_Status__c = NULL OR Discount_Approval_Status__c IN: allowedDDAStatus) ORDER BY CreatedDate DESC';
+                String victimOppQuery = queryFilter + ' AND Id IN : victimOppIds';
+                for (Opportunity subOpp : database.query(survivorOppQuery)) {
+                    if (!oppSurvivorRecWithKey.containsKey(subOpp.Opportunity_Key__c)) {
+                        oppSurvivorRecWithKey.put(subOpp.Opportunity_Key__c, subOpp);
+                    } else {
+                        //If multiple oppties has same key, then pick the opportunity which has product count > 0 and recently created
+                        if (oppSurvivorRecWithKey.get(subOpp.Opportunity_Key__c).Product_Count__c == 0 && subOpp.Product_Count__c > 0) {
+                            oppSurvivorRecWithKey.put(subOpp.Opportunity_Key__c, subOpp);
+                        }
+                    }
+                }
+                //Get the victim oppty details
+                victimOppList = Database.query(victimOppQuery);
+                Map<Id, Opportunity> victimOppMap = new Map<Id, Opportunity>(victimOppList);
+
+                //Query the victim CLI to generate a key
+                Map<Id, ContractLineItem> victimCliMap = new Map<Id, ContractLineItem>(
+                    [
+                        SELECT
+                            Id,
+                            RecordType.Name,
+                            ServiceContract.Contract_Term__c,
+                            ServiceContract.Contact.Contact_Csn__c,
+                            ServiceContract.Contact.Email,
+                            ServiceContract.Term,
+                            ServiceContract.Contract_Term_UOM__c,
+                            ServiceContract.Billing_Behavior_Code__c,
+                            Next_Billing_Date__c,
+                            ServiceContract.Account.Country_Lookup__r.Country_Code__c,
+                            Reseller_Account__c,
+                            Reseller_Account__r.Account_CSN__c,
+                            Reseller_Account__r.Internal_Use__c,
+                            Asset__c,
+                            Asset__r.Reseller_Account__c,
+                            Asset__r.Contract_Term__c,
+                            Asset__r.Reseller_Account__r.Account_CSN__c,
+                            Asset__r.Reseller_Account__r.Internal_Use__c,
+                            Parent_Opportunity__c,
+                            Split_Opportunity__c,
+                            Split_Opportunity__r.isClosed,
+                            Split_Opportunity__r.Reason__c,
+                            Split_Opportunity__r.Parent_Opportunity_Id__r.isClosed,
+                            ServiceContract.Account.Account_Csn__c,
+                            Purchaser__r.Contact_CSN__c,
+                            Purchaser__r.Email,
+                            Term__c,
+                            Actual_End_Date__c,
+                            ServiceContract.Account.Name,
+                            Nurturing_Lock_Date__c
+                        FROM ContractLineItem
+                        WHERE Opportunity__c IN :victimOppMap.keySet()
+                    ]
+                );
+                for (ContractLineItem cli : victimCliMap.values()) {
+                    if (cli.RecordType.Name == 'ODM') {
+                        newkeyForVictim = SUBS_OpportunityCreationUtility.getRenewalKey(cli);
+                    } else if (cli.RecordType.Name == 'Direct') {
+                        newkeyForVictim = SUBS_TransitionSubsOpptyforDirectService.getRenewalKey(cli);
+                    } else {
+                        newkeyForVictim = SUBS_TransitionSubscriptionOpptyUtility.getRenewalKey(cli);
+                    }
+                    victimCliWithNewKeyMap.put(cli.Id, newkeyForVictim);
+                }
+            }
+        } catch (Exception e) {
+            isError = true;
+            for (Transaction__c txn : txnLstUpdated) {
+                txn.Status__c = 'Failed';
+                txn.Error__c = 'Message:' + e.getMessage() + ' Line No:' + e.getLineNumber() + ' Stack trace:' + e.getStackTraceString() + ' Cause:' + e.getCause();
+            }
+            update txnLstUpdated;
+        }
+        if (!isError) {
+            TransactionEventTriggerHelper.handleSubsOpptyMerge('Account Merge', victimOppList, oppSurvivorRecWithKey, txnLstUpdated, victimCliWithNewKeyMap);
+        }
+    }
+
+    public static void mapPrice(OpportunityLineItem oli, Price price) {
+        oli.Unit_SRP__c = price.unitSRP;
+        oli.Extended_SRP__c = price.extendedSRP;
+        oli.Special_Program_Discount_Amount__c = price.specialProgramDiscountAmount;
+        oli.Renewal_Discount_Percent__c = price.renewalDiscountPercent;
+        oli.Renewal_Discount_Amount__c = price.renewalDiscountAmount;
+        oli.Transaction_Volume_Discount_Percentage__c = price.transactionVolumeDiscountPercent;
+        oli.Transaction_Volume_Discount__c = price.transactionVolumeDiscountAmount;
+        oli.Service_Duration_Discount_Percent__c = price.serviceDurationDiscountPercent;
+        oli.Service_Duration_Discount_Amount__c = price.serviceDurationDiscountAmount;
+        oli.Promotion_Discount_Percent__c = price.promotionDiscountPercent;
+        oli.Promotion_Discount_Amount__c = price.promotionDiscountAmount;
+        oli.DiscountsApplied__c = price.discountsApplied;
+        oli.Extended_Discount_Srp__c = price.extendedDiscountedSRP;
+        oli.Additional_Discount_Per__c = price.endUserAdditionalDiscountPercent;
+        oli.Additional_Discount_Amount__c = price.endUserAdditionalDiscountAmount;
+        oli.Total_Discount_Amount__c = oli.Additional_Discount_Amount__c;
+        oli.ExclusiveDiscountsApplied__c = price.exclusiveDiscountsApplied;
+        oli.Calculated_Net_Price__c = price.endUserPrice;
+        oli.TotalPrice = price.endUserPrice;
+        OpportunityLineItemTriggerServices.allowODMUpdates = true;
+        oli.Adjusted_SRP__c = price.extendedDiscountedSRP / oli.Quantity;
+        oli.Total_Adjusted_SRP__c = price.extendedDiscountedSRP;
+
+        //CRMEAGLE-3361
+        oli.Intended_Usage_Discount__c = price.intendedUsageDiscountPercent;
+        oli.Intended_Usage_Discount_Amount__c = price.intendedUsageDiscountAmount;
+        oli.Business_Type_Discount__c = price.businessTypeDiscountPercent;
+        oli.Business_Type_Discount_Amount__c = price.businessTypeDiscountAmount;
+        oli.Partner_Discounts_Applied__c = price.partnerDiscountsApplied;
+    }
+
+    /* public static void mapAtrFields(OpportunityLineItem oli, Price price) {
+        Decimal acvValue = 0;
+        if (oli.Term__c == '3-Year') {
+            acvValue = price.endUserPrice / 3;
+        } else {
+            acvValue = price.endUserPrice;
+        }
+        SUBS_OpportunityPriceService.calculateAtrValues(oli, acvValue);
+    }*/
+
+    public static void mapOfferAttributes(OpportunityLineItem newOli, LineItem li) {
+        newOli.Access_Model__c = li.offer.accessModel;
+        newOli.Billing_Behavior__c = li.offer.billingBehavior;
+        newOli.Billing_Type__c = li.offer.billingType;
+        newOli.Intended_Usage__c = li.offer.intendedUsage;
+        newOli.Connectivity__c = li.offer.connectivity;
+        newOli.Connectivity_Interval__c = li.offer.connectivityInterval;
+        newOli.Billing_Frequency__c = li.offer.billingFrequency;
+        newOli.Service_Plan__c = li.offer.servicePlanId;
+        newOli.Term__c = TransactionEventTriggerHelperExtUtility.getTerm(li.offer.billingTerm);
+    }
+
+    public class Order {
+        public String id;
+        public String created;
+        String lastModified;
+        public String orderState;
+        public String quoteId;
+        public OrderOpportunity opportunity;
+        public NurtureAccount agentAccount;
+        public List<LineItem> lineItems;
+        public Price_Z price;
+        public Payment payment;
+        public List<OrderOperation> orderOperations; //DAASN-25942
+    }
+    public class Payment {
+        public String paymentMethod;
+    }
+    public class Price_Z {
+        public String orderCurrency;
+    }
+    public class OrderOpportunity {
+        String id;
+        public String buyerAgentEmail;
+    }
+    public class NurtureAccount {
+        public String accountCsn;
+    }
+    public class LineItem {
+        public String id;
+        public String type;
+        public String action;
+        public String quoteLineItemId;
+        public String refundPending;
+        public String quantity;
+        public String state;
+        public Price price;
+        public SubscriptionInfo subscriptionInfo;
+        public Offer offer;
+        public Offering offering;
+    }
+    public class Price {
+        Decimal unitSRP;
+        Decimal extendedSRP;
+        Decimal specialProgramDiscountAmount;
+        Decimal renewalDiscountPercent;
+        Decimal renewalDiscountAmount;
+        Decimal transactionVolumeDiscountPercent;
+        Decimal transactionVolumeDiscountAmount;
+        Decimal serviceDurationDiscountPercent;
+        Decimal serviceDurationDiscountAmount;
+        Decimal promotionDiscountPercent;
+        Decimal promotionDiscountAmount;
+        Decimal discountsApplied;
+        Decimal extendedDiscountedSRP;
+        Decimal endUserAdditionalDiscountPercent;
+        Decimal endUserAdditionalDiscountAmount;
+        Decimal exclusiveDiscountsApplied;
+        public Decimal endUserPrice;
+
+        //CRMEAGLE-3361
+        Decimal intendedUsageDiscountPercent;
+        Decimal intendedUsageDiscountAmount;
+        Decimal businessTypeDiscountPercent;
+        Decimal businessTypeDiscountAmount;
+        Decimal partnerDiscountsApplied;
+    }
+    public class SubscriptionInfo {
+        public String subscriptionId;
+        public String referenceSubscriptionId;
+        public String subscriptionPeriodStartDate;
+        public String subscriptionPeriodEndDate;
+        public String subscriptionNextRenewalDate;
+        public String referenceSubscriptionIds; //CRMEAGLE-1759
+        public String customerStartDate;
+        public String customerEndDate;
+    }
+
+    public class Offering {
+        public String id;
+        public String code;
+        public String name;
+    }
+
+    public class Offer {
+        public String accessModel;
+        public String intendedUsage;
+        public String connectivity;
+        public String connectivityInterval;
+        public String servicePlanId;
+        public String billingBehavior;
+        public String billingTerm;
+        public String billingType;
+        public String billingFrequency;
+        public String pricingMethod; //CRMEAGLE-1759
+    }
+    public class OrderOperation { //DAASN-25942
+        public String id;
+        public String event;
+        public String created;
+        public String requestedBy;
+        public String operation;
+        public String subOperation;
+        public String orderId;
+    }
+}
