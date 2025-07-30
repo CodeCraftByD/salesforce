@@ -1,0 +1,44 @@
+public class LeadCreationToastController {
+  public String recentLeadId { get; private set; }
+    
+    public LeadCreationToastController() {
+        system.debug('entered LeadCreationToastController');
+        Recent_Lead_Creation__c recentLead = Recent_Lead_Creation__c.getInstance(UserInfo.getUserId());
+         system.debug('recentLead Controller: '+recentLead);
+        if(recentLead != null && recentLead.Lead_Id__c != null) {
+            // Check if the lead exists and has Show_Toast__c = true
+            List<Lead__c> leads = [SELECT Id FROM Lead__c WHERE Id = :recentLead.Lead_Id__c AND Show_Toast__c = true LIMIT 1];
+             system.debug('leads Controller: '+leads);
+            if(!leads.isEmpty()) {
+                recentLeadId = recentLead.Lead_Id__c;
+                system.debug('recentLeadId '+recentLeadId);
+            }
+        }
+    }
+    
+    // This method runs when the page loads (via the action attribute)
+    public PageReference resetFlag() {
+         system.debug('recentLeadId PageReference'+recentLeadId);
+        if(String.isNotBlank(recentLeadId)) {
+            try {
+                Lead__c lead = new Lead__c(
+                    Id = recentLeadId,
+                    Show_Toast__c = false
+                );
+                system.debug('lead '+lead);
+                update lead;
+                
+                // Also clear the custom setting
+                Recent_Lead_Creation__c recentLead = Recent_Lead_Creation__c.getInstance(UserInfo.getUserId());
+                if(recentLead != null) {
+                    recentLead.Lead_Id__c = null;
+                     system.debug('recentLead '+recentLead);
+                    update recentLead;
+                }
+            } catch(Exception e) {
+                System.debug('Error updating lead flag: ' + e.getMessage());
+            }
+        }
+        return null;
+    } 
+}
