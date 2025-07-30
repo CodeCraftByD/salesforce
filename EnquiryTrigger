@@ -1,0 +1,21 @@
+trigger EnquiryTrigger on Enquiry__c (before insert,after insert,before update,after update) {
+    if (Trigger.isAfter && Trigger.isInsert) {
+        EnquiryTriggerHandler.handleAfterInsert(Trigger.new);
+        EnquiryTriggerHandler.insertAccount(Trigger.new,null);
+      // EnquiryCheckInController.updateLocation(Trigger.new);
+    }
+    
+    if (Trigger.isBefore && Trigger.isInsert) {
+        System.debug('before insert: ' + Trigger.new);
+        EnquiryTriggerHandler.updateEnquirytoQualified(Trigger.new, Trigger.oldMap); 
+    }
+    
+    if (Trigger.isAfter && Trigger.isUpdate) {
+        EnquiryTriggerHandler.insertAccount(Trigger.new, Trigger.oldMap);
+        //ALCheckinCheckout.Method1(Trigger.new, Trigger.oldMap);
+    }
+    if (Trigger.isBefore && Trigger.isUpdate) {
+        System.debug('before Update: ' + Trigger.new);
+        EnquiryTriggerHandler.updateEnquirytoQualified(Trigger.new, Trigger.oldMap);  
+    }
+}
