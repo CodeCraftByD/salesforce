@@ -18,8 +18,8 @@ public class EnquiryTriggerHandler {
 
             // Fetch matching Users (assuming picklist holds FirstName)
             Map<String, User> nameToUserMap = new Map<String, User>();
-            for (User u : [SELECT Id, FirstName FROM User WHERE FirstName IN :memberNames]) {
-                nameToUserMap.put(u.FirstName, u);
+            for (User u : [SELECT Id, Name FROM User WHERE Name IN :memberNames]) {
+                nameToUserMap.put(u.Name, u);
             }
 
             // Get Custom Notification Type ID
@@ -196,7 +196,7 @@ public class EnquiryTriggerHandler {
 
     
     // Helper method to store the recent lead ID in a custom setting
-private static void setRecentLeadId(Id leadId) {
+/*private static void setRecentLeadId(Id leadId) {
     // Create or update a custom setting record to store the lead ID
     Recent_Lead_Creation__c recentLead = Recent_Lead_Creation__c.getInstance(UserInfo.getUserId());
     System.debug('recentLead : '+recentLead);
@@ -214,7 +214,7 @@ private static void setRecentLeadId(Id leadId) {
         System.debug('newRecord: '+newRecord);
     }
     
-}
+}*/
     
     
     public static void insertAccount(List<Enquiry__c> newList, Map<Id, Enquiry__c> oldMap) {
@@ -277,17 +277,19 @@ private static void setRecentLeadId(Id leadId) {
                 if (!leadToInsert.isEmpty()) {
                     insert leadToInsert;
                     
-                    /*if (leadToInsert.size() > 0) {
-                        List<ENquiryCheckIn__e> events = new List<ENquiryCheckIn__e>();// Replace ENquiryCheckIn__e with platform event name
+                    if (leadToInsert.size() > 0) {
+                        List<LeadCreated__e> events = new List<LeadCreated__e>();
                         for(Lead__c ld : leadToInsert){
-                                events.add(new ENquiryCheckIn__e(LeadId__c = ld.Id)); // replace LeadId__c with platform event created field name
+                                events.add(new LeadCreated__e(LeadId__c = ld.Id,UserId__c = UserInfo.getUserId()));
 
                         } 
                         if(!events.isEmpty()){
+                            System.debug('events :'+events);
                             EventBus.publish(events);
-                        }*/
-                        setRecentLeadId(leadToInsert[0].Id);
+                        }
+                        //setRecentLeadId(leadToInsert[0].Id);
                     }
+                }
             } catch (Exception e) {
                 System.debug('exception: '+e);
             }
@@ -382,7 +384,7 @@ private static void setRecentLeadId(Id leadId) {
         ld.Lead_Brand__c = enq.Enquiry_Brand__c;
         ld.Lead_Employee_Responsible__c = enq.Owner.Name;
         ld.Lead_Status__c = 'Plan to Buy'; 
-        ld.Show_Toast__c = true;
+        //ld.Show_Toast__c = true;
         return ld;
     }
       
