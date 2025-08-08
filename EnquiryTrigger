@@ -2,7 +2,7 @@ trigger EnquiryTrigger on Enquiry__c (before insert,after insert,before update,a
     if (Trigger.isAfter && Trigger.isInsert) {
         EnquiryTriggerHandler.handleAfterInsert(Trigger.new);
         EnquiryTriggerHandler.insertAccount(Trigger.new,null);
-      // EnquiryCheckInController.updateLocation(Trigger.new);
+       EnquiryCheckInController.updateLocation(Trigger.new);
     }
     
     if (Trigger.isBefore && Trigger.isInsert) {
