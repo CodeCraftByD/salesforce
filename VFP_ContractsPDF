@@ -1,0 +1,184 @@
+<apex:component >
+    <apex:attribute name="contractObj" type="Contract" description="Information about contract."/>
+    <apex:attribute name="OpportunityObj" type="Opportunity" description="Information about Opportunity."/>
+    <apex:attribute name="acc" type="Account" description="Information about Account."/>
+    <apex:attribute name="con" type="Contact" description="Information about Contact"/>
+    <apex:attribute name="isSMorLH" description="stores the related contact id" type="String"/>
+    <apex:attribute name="contractStartDate" description="stores the related contact id" type="String"/>
+    <apex:attribute name="oliWrapper" Type="List" description="stores the related contact id" />
+    <apex:attribute name="addOnWrapper" Type="List" description="stores the add on products detail" />
+    
+    <apex:pageBlock >
+        <apex:outputPanel layout="block" style="width: 100%;padding-left: 2%;">
+            <div style="width: 50%; display: inline-block;">
+                
+            </div>
+            <div style="width: 50%; display: inline;">
+                <b style="font-size: 14px;">{!$Label.OrderLabel}: </b> {!contractObj.ContractNumber} <br/>
+                
+            </div>
+        </apex:outputPanel>
+        <apex:outputPanel layout="block" style="width: 100%;padding-left: 2%;">
+            <div style="width: 50%; display: inline-block;">
+                
+            </div>
+            <div style="width: 50%; display: inline;">
+                <b style="width: 50%; display: inline;font-size: 14px;">{!$Label.OrderDateLabel}: </b>  {!contractStartDate} 
+            </div>
+        </apex:outputPanel>
+        <apex:outputPanel layout="block" style="width:100%;display:block;padding-top:2%;">
+        	<apex:outputPanel layout="block" style="width:50%;display:inline-block;word-wrap: break-word;">
+            	<b style="{!IF(CONTAINS(isSMorLH,'LH'), 'font-weight: 300; color: #FFA078;', 'font-weight: 300; font-size: 16px; color: #008BCE;')}">{!$Label.BillingInfoLabel}</b>
+                
+            </apex:outputPanel>
+            <apex:outputPanel layout="block" style="width:50%;display:inline;word-wrap: break-word;">
+            	<b style="{!IF(CONTAINS(isSMorLH,'LH'), 'font-weight: 300; color: #FFA078;', 'font-weight: 300; font-size: 16px; color: #008BCE;')}">{!$Label.PropertyInfoLabel}</b>
+            	
+            </apex:outputPanel>
+        </apex:outputPanel>
+        <apex:outputPanel layout="block" style="width:100%;display:block;">
+        	<apex:outputPanel layout="block" style="width:50%;display:inline-block;">
+                <apex:pageBlockSection >
+                    <apex:pageBlockSectionItem dataStyle="width: 90%; vertical-align:top;">
+                        <div style="display:table">
+                            <div style="display:table-row;">
+                                <div style="display:table-cell;font-size: 14px;">
+                                    <b>{!$Label.CustomerLabel}: </b>
+                                </div>
+                                <div style="display:table-cell;font-size: 14px;">
+                                    {!acc.Name}
+                                </div>
+                            </div>
+                            
+                            <div style="display:table-row;">
+                                <div style="display:table-cell;font-size: 14px;">
+                                    <b>{!$Label.AddressLabel}:  </b>
+                                </div>
+                                <div style="display:table-cell;font-size: 14px;">
+                                    {!acc.BillingStreet} <br/> {!acc.BillingCity+' '+acc.BillingState+' '+acc.BillingPostalCode} <br/> {!acc.BillingCountry}
+                                </div>
+                            </div>
+                            
+                            <div style="display:table-row;">
+                                <div style="display:table-cell;font-size: 14px;">
+                                    <b>{!$Label.ContactNameEmailLabel}: </b>
+                                </div>
+                                <div style="display:table-cell;font-size: 14px;">
+                                    {!con.Name}
+                                </div>
+                            </div>
+                            
+                            <div style="display:table-row;">
+                                <div style="display:table-cell;font-size: 14px;">
+                                    <b>{!$Label.EmailLabel}: </b>
+                                </div>
+                                <div style="display:table-cell;font-size: 14px;">
+                                    {!con.Email}
+                                </div>
+                            </div>
+                        </div>
+                        <!--<table>
+                            <tr>
+                                <td style="font-size: 14px;"><b>{!$Label.CustomerLabel}: </b></td>
+                                <td style="font-size: 14px;">{!acc.Name}</td>
+                            </tr>
+                            <tr>
+                                <td style="vertical-align: top;font-size:14px;"><b>{!$Label.AddressLabel}: </b></td>
+                                <td style="font-size: 14px;">{!acc.BillingStreet} <br/> {!acc.BillingCity+' '+acc.BillingState+' '+acc.BillingPostalCode} <br/> {!acc.BillingCountry} </td>
+                            </tr>
+                            <tr>
+                                <td style="font-size: 14px;"><b>{!$Label.ContactLabel}: </b></td>
+                                <td style="font-size: 14px;">{!con.Name}</td>
+                            </tr>
+                            <tr>
+                                <td style="font-size: 14px;"><b>{!$Label.EmailLabel}: </b></td>
+                                <td style="font-size: 14px;">{!con.Email}</td>
+                            </tr>
+                            
+                        </table>-->
+                    </apex:pageBlockSectionItem>
+                </apex:pageBlockSection>
+            </apex:outputPanel>
+            <apex:outputPanel layout="block" style="width:50%;display:inline-block;">
+            	<apex:pageBlockSection >
+                    <apex:pageBlockSectionItem dataStyle="width: 90%; vertical-align:top;">
+                        <div style="display:table">
+                            <div style="display:table-row;">
+                                <div style="display:table-cell;font-size: 14px;">
+                                    <b>{!$Label.PropertyNameLabel}: </b>
+                                </div>
+                                <div style="display:table-cell;font-size: 14px;">
+                                    {!acc.Name}
+                                </div>
+                            </div>
+                            <div style="display:table-row;">
+                                <div style="display:table-cell;font-size: 14px;">
+                                    <b>{!$Label.PropertyLabel}: </b>
+                                </div>
+                                <div style="display:table-cell;font-size: 14px;">
+                                    {!acc.BillingStreet} <br/> {!acc.BillingCity+' '+acc.BillingState+' '+acc.BillingPostalCode} <br/> {!acc.BillingCountry}
+                                </div>
+                            </div>
+                        </div>
+                        <!--<table >
+                            <tr>
+                                <td style="font-size: 14px;"><b>{!$Label.PropertyNameLabel}: </b></td>
+                                <td style="font-size: 14px;">{!acc.Name}</td>
+                            </tr>
+                            <tr>
+                                <td style="vertical-align: top;font-size: 14px;"><b>{!$Label.PropertyLabel}: </b></td>
+                                <td style="font-size: 14px;">{!acc.BillingStreet} <br/> {!acc.BillingCity+' '+acc.BillingState+' '+acc.BillingPostalCode} <br/> {!acc.BillingCountry} </td>
+                            </tr>
+                            <br/>
+                            <br/>
+                        </table>-->
+                        <br/>
+                        <br/>
+                    </apex:pageBlockSectionItem>
+                </apex:pageBlockSection>
+            </apex:outputPanel>
+        </apex:outputPanel>
+        <apex:pageBlockSection columns="1">
+            <apex:pageBlockSectionItem dataStyle="padding-top:30px;font-size: 14px;">
+                <apex:outputText escape="false" value="{!$Label.ContractPDFIntro}">
+                	<apex:param value="{!con.FirstName}"/>
+                </apex:outputText>
+            </apex:pageBlockSectionItem>
+        </apex:pageBlockSection>
+        <apex:pageBlockSection columns="2" dir="RTL">
+            <apex:pageBlockSectionItem dataStyle="padding-top:30px;">
+                <table>
+                    <tr style="{!IF(OR(ISNULL(OpportunityObj.MaxTrialPeriod__c),ISBLANK(OpportunityObj.MaxTrialPeriod__c), OpportunityObj.MaxTrialPeriod__c == 0), 'display: none;', '')}">
+                        <td style="font-size: 14px;"><b>{!$Label.FreePeriodLabel}: </b></td>
+                        <td style="font-size: 14px;">{!FLOOR(OpportunityObj.MaxTrialPeriod__c)} {!$Label.DaysLabel}</td>
+                    </tr>
+                    <tr>
+                        <td style="font-size: 14px;"><b>{!$Label.IntialTermLabel}: </b></td>
+                        <td style="font-size: 14px;">{!IF(OR(contractObj.ContractTerm == 1), '1 '+$Label.MonthConLabel, TEXT(contractObj.ContractTerm)+' '+$Label.MonthsLabel)}</td>
+                    	
+                    </tr>
+                    <tr>
+                        <td style="font-size: 14px;"><b>{!$Label.RenewalLabel}: </b></td>
+                        <td style="font-size: 14px;">{!$Label.MonthLabel}</td>
+                    </tr>
+                </table>
+            </apex:pageBlockSectionItem>
+        </apex:pageBlockSection>
+       
+        <apex:outputPanel layout="block">
+            <c:ProductsPricingVFComponentPDF objWrapper="{!oliWrapper}" isNewPromoLangTranslated="TRUE" isPromoTranslated="TRUE" fontSize="14px" oppId="{!OpportunityObj.Id}" lmProdSelection="{!isSMorLH}" tableHeader="{!$Label.OrderSummaryLabel}"/>
+        </apex:outputPanel>
+        <br/>
+        <apex:outputPanel layout="block">
+            <c:AddOnsPricingVFComponentPDF objWrapper="{!addOnWrapper}" fontSize="14px" />
+        </apex:outputPanel>
+        <br/>
+        <apex:outputPanel layout="block">
+        <div style="font-size: 16px;font-weight:900;">{!$Label.TermsAndConditions}</div>
+        <apex:outputText escape="false" value="{!$Label.TermsAndConditionsText}" style="font-size: 14px;">
+            <apex:param value="{!IF(CONTAINS(isSMorLH,'LH'), 'Little Hotelier', 'SiteMinder')}"/>
+            <apex:param value="{!IF(CONTAINS(isSMorLH,'LH'), 'https://www.littlehotelier.com/legal/terms-and-conditions/', 'https://www.siteminder.com/legal/terms-and-conditions/')}"/>
+        </apex:outputText>
+    </apex:outputPanel>
+    </apex:pageBlock>
+</apex:component>
