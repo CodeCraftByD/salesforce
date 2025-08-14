@@ -1,0 +1,24 @@
+<apex:page applyBodyTag="false" renderAs="PDF" showHeader="false" standardStylesheets="true" standardController="Contract" extensions="VFC_GenerateContractsPDF" lightningstylesheets="false" language="{!objOpportunity.Contact_Name__r.Language__r.EmailCode__c}">      
+    <head> 
+        <style> 
+            body { font-family: Arial Unicode MS; }
+        </style> 
+    </head>
+    <apex:form id="frm">
+        <apex:outputPanel layout="block" styleClass="dialogContentDiv">
+            <div class="fixed-header" style="display: inline-block; width: 70%;">
+                <c:Quotes_Header isSMorLH="{!lmProductSelection}" page="Contract"/>
+            </div>
+            <div>
+                <c:VFP_ContractsPDF isSMorLH="{!lmProductSelection}" 
+                                    OpportunityObj="{!objOpportunity}" 
+                                    contractStartDate="{!startDateObj}" 
+                                    contractObj="{!objCon}" 
+                                    acc="{!objOpportunity.Account}" 
+                                    con="{!objOpportunity.Contact_Name__r}" oliWrapper="{!lineItemsWrapper}"
+                                    addOnWrapper="{!addOnWrap}">
+                </c:VFP_ContractsPDF>
+            </div>
+        </apex:outputPanel>
+    </apex:form>
+</apex:page>
