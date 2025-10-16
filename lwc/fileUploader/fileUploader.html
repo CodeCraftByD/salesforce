@@ -1,0 +1,114 @@
+<!--
+ - Created by dekhanna on 12/8/2020.
+ *  * *  Change history
+ * 
+ * #1 - EFSALES-4377 - Karthik.A - 6/17/2022 - Added "Add another file?" Modal
+ * #2 - EFSALES-9028 - Karthik.A - 02/08/2024 - Update the Logic related to "Done" & "Yes" buttons
+ * #3 - EFSALES-9047 - JaLandry - Business License Expiration Date
+ -->
+
+<!-- File Uploader -->
+<template>
+    <!-- lightning button for open modal window -->
+    <lightning-button variant="brand"  record-id={getIdFromParent}
+                      label="Upload Files"
+                      title="Upload Files"
+                      onclick={openModal}
+                      class="slds-m-right--small">
+    </lightning-button>
+    <!--Use template if:true to display/hide popup based on isModalOpen value-->
+    <template if:true={isModalOpen}>
+        <!-- Modal/Popup Box LWC starts here -->
+        <section role="dialog" tabindex="-1" aria-labelledby="modal-heading-01" aria-modal="true" aria-describedby="modal-content-id-1" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container">
+                <!-- Modal/Popup Box LWC header here -->
+               <header class="slds-modal__header">
+                    <button class="slds-button slds-button_icon slds-modal__close slds-button_icon-inverse" title="Close" onclick={closeModal}>
+                        <lightning-icon icon-name="utility:close"
+                                        alternative-text="close"
+                                        variant="inverse"
+                                        size="small" onclick={resetUpload}></lightning-icon>
+                        <span class="slds-assistive-text">Close</span>
+                    </button>
+                    <h2 id="modal-heading-01" class="slds-text-heading_medium slds-hyphenate">File Uploader</h2>
+                </header>
+                <!-- Modal/Popup Box LWC body starts here -->
+                <div class="slds-modal__content slds-p-around_medium" id="modal-content-id-1">
+                    <lightning-record-edit-form object-api-name="ContentVersion">
+                        <div>
+                         <lightning-input-field  field-name="Category__c"  onchange={updateCategory}  type="combobox" message-when-value-missing="Please enter your Last Name" ></lightning-input-field>
+                            <div class="slds-text-body_small slds-text-color_error" if:true={errorCategory}>
+                                <p>{errorCategoryMessage}</p>
+                            </div>
+                            <div if:true={showExpDate}>
+                                <lightning-input-field  field-name="Business_License_Expiration_Date__c" onchange={dateHandleChange} date-style="short"  type="date" value={noDateString}></lightning-input-field>
+                                <div class="slds-text-body_small slds-text-color_error" if:true={errorDate}>
+                                    <p>{errorDateMessage}</p>
+                                </div>
+                            </div>
+                        </div><br/>
+                    </lightning-record-edit-form>
+                    <div style="width: auto;">
+                        <div>
+                            <template if:true={showFileUploader}>
+                                <lightning-file-upload
+                                        label=""
+                                        name="fileUploader"
+                                        accept={acceptedFormats}
+                                        record-id={getIdFromParent}
+                                        onuploadfinished={handleUploadFinished}>
+                                </lightning-file-upload>
+                            </template>
+                        </div><br/>
+
+                        <div class="slds-text-body_small slds-text-color_success">{fileName}
+                            <div class="slds-text-body_small slds-text-color_error" if:true={error}>
+                                <p>{errorMessage}</p>
+                            </div>
+                            <template if:true={showLoadingSpinner}>
+                                <lightning-spinner alternative-text="Uploading......" size="medium"></lightning-spinner>
+                            </template>
+                        </div>
+                        <div>
+<!--                            <lightning-button class="slds-m-top&#45;&#45;medium" label={UploadFile} onclick={handleSave} variant="brand" disabled={isTrue} ></lightning-button>-->
+                            <!--</br></br>-->
+
+                        </div>
+                    </div>
+                </div>
+                <!-- Modal/Popup Box LWC footer starts here -->
+                <footer class="slds-modal__footer">
+                    <template if:true={isFileUploaded}>
+                    <!--<button class="slds-button slds-button_neutral" onclick={closeModal} title="Cancel">Cancel</button> -->
+<!--                    <button class="slds-button slds-button_brand" title="Save File" onclick={handleSave} variant="brand" disabled={isTrue} ></button>-->
+                    <button class="slds-button slds-button_brand" onclick={closeModal} title="Done">Done</button>
+                    </template>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+    <template if:true={ConfirmModalOpen}>
+        <section role="dialog" tabindex="-1" aria-labelledby="modal-heading-01" aria-modal="true" aria-describedby="modal-content-id-1" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container">
+                <!-- Modal/Popup Box LWC header here -->
+               <header class="slds-modal__header">
+                    <button class="slds-button slds-button_icon slds-modal__close slds-button_icon-inverse" title="Close" onclick={closeModal}>
+                        <lightning-icon icon-name="utility:close"
+                                        alternative-text="close"
+                                        variant="inverse"
+                                        size="small" onclick={resetUpload}></lightning-icon>
+                        <span class="slds-assistive-text">Close</span>
+                    </button>
+                    <h2 class="slds-text-heading_medium slds-hyphenate">Add another file?</h2>
+                </header>
+                    <footer class="slds-modal__footer">
+                        <button class="slds-button slds-button_brand" onclick={handleYesClick} title="Yes" >Yes</button>
+                        <button class="slds-button slds-button_brand" onclick={closeConfirmModal} title="No" >No</button>
+                    </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open" role="presentation"></div>
+    </template>
+</template>

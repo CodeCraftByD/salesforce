@@ -1,0 +1,97 @@
+<!--
+ - Created by dekhanna on 12/7/2020.
+ -->
+
+<!-- Document Manager -->
+<template>
+    <c-file-uploader get-id-from-parent={recordId} onfilevaluechange={handleFileValueChange} ></c-file-uploader>
+    <br/>
+    <br if:true={fileValue} />
+    <lightning-datatable
+        data={fileValue}
+        columns={columns}
+        key-field="id"
+        onrowaction={handleRowActions}
+        hide-checkbox-column="true"
+        sorted-by={sortBy}
+        sorted-direction={sortDirection}
+        onsort={handleSortdata}>
+    </lightning-datatable>
+    <br />
+    <br />
+
+
+    <c-confirmation-dialog
+        title='Approve Document'
+        message={approveDialogMessage}
+        confirm-label='Yes'
+        cancel-label='No'
+        visible={isApproveDialogVisible}
+        original-message={approveOriginalMessage}
+        name="approvalDocumentConfirmModal"
+        onclick={handleApprovalClick}>
+    </c-confirmation-dialog>
+    <c-confirmation-dialog
+            title='Reject Document'
+            message={rejectDialogMessage}
+            confirm-label='Reject'
+            cancel-label='Cancel'
+            visible={isRejectDialogVisible}
+            original-message={rejectOriginalMessage}
+            name="rejectDocumentConfirmModal"
+            confirm-disabled={rejectButtonDisabled}
+            onclick={handleRejectClick}>
+        <lightning-combobox
+                required
+                name="rejectReason"
+                value={currentRowCategory}
+                label="Reject Reason"
+                placeholder="Select Reject Reason"
+                options={rejectPicklistOptions}
+                onchange={handleRecategorizeOnChange}
+                class="slds-m-top_small"
+                message-when-value-missing="Please let the DSM know why you are rejecting this document.">
+        </lightning-combobox>
+        <lightning-textarea
+                name="rejectComment"
+                required
+                value=""
+                placeholder="Why are you rejecting this document?"
+                label="Comment"
+                maxlength="255"
+                onchange={handleRecategorizeOnChange}
+                message-when-too-long="Please limit your comment to 255 characters."
+                message-when-value-missing="Please provide more information for why you are rejecting this document.">
+        </lightning-textarea>
+    </c-confirmation-dialog>
+    <c-confirmation-dialog
+            title='Delete Document'
+            message={deleteDialogMessage}
+            confirm-label='Yes'
+            cancel-label='No'
+            visible={isDeleteDialogVisible}
+            original-message={deleteOriginalMessage}
+            name="deleteDocumentConfirmModal"
+            onclick={handleDeleteClick}>
+    </c-confirmation-dialog>
+    <c-confirmation-dialog
+            title='Recategorize Document'
+            message={recategorizeDialogMessage}
+            confirm-label='Save'
+            cancel-label='Cancel'
+            visible={isRecategorizeDialogVisible}
+            original-message={recategorizeOriginalMessage}
+            name="recategorizeDocumentConfirmModal"
+            confirm-disabled={recategorizeConfirmButtonDisabled}
+            onclick={handleRecategorizeClick}>
+        <lightning-combobox
+                name="category"
+                value={currentRowCategory}
+                label="Document Category"
+                placeholder="Select Category"
+                options={categoryPicklistOptions}
+                onchange={handleCategoryOnChange}
+                class="slds-m-top_small">
+        </lightning-combobox>
+    </c-confirmation-dialog>
+</template>
