@@ -1,0 +1,472 @@
+/**
+* *  Change history
+ * #1 - EFSALES-3918 - karthik - 21/01/2022 - on Close IDT case, Added logic for Resolution "Closed – Duplicate Missing Documents" 
+ * #2 - EFSALES-6662 - karthik - 11/04/2022 - Changed Condition for Updating Out_of_Compliance_1 in beforeUpdate method
+ * #3 - EFSALES-8920 - jalandry - 8/22/2024 - Inconclusive value for ID Theft
+ * #4 - EFSALES-9938 - jalandry - 3/04/2025 - Identity Theft Cases: Add CBRIDTHEFT Value for Spectrum Activity Co des
+ * #5 - EFSALES-10177 - Susmitha - 7/17/2025 - Remove SOQLs from for Loop in the method updateCaseToNewQueue.
+ */
+public class caseTriggerHandler {
+    
+    private static Id IDTcaseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByDeveloperName().get('ID_Theft').getRecordTypeId();
+    private static Id DAcaseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByDeveloperName().get('Dealer_Advocacy').getRecordTypeId();
+
+    public static void afterInsert(Map<Id,Case> sCaseMap)
+    {
+        Case c;
+        Investigation_RR__c cAutoNum;
+        List<Investigation_RR__c> autoList = new List<Investigation_RR__c>();
+        System.debug('Entered Handler');
+        for(Id caseId: sCaseMap.keyset()){
+            // Creates Child AutoNos
+            system.debug('RecTypeName: ' + sCaseMap.get(caseId).RecordType.Name);
+            if(sCaseMap.get(caseId).Category__c =='Investigations'){
+                System.debug('Inside If');
+                cAutoNum = new Investigation_RR__c();
+                cAutoNum.CaseId__c= caseId;
+                autoList.add(cAutoNum);
+            }
+        }
+
+        insert autoList;
+        List<Investigation_RR__c> atNum = new List<Investigation_RR__c>();
+        List<Case> updCaseList = new List<Case>();
+        if(autoList.Size() > 0 && autoList!= NULL){
+            atNum = [Select Name,CaseId__c from Investigation_RR__c where Id =:autoList[0].Id];
+        }
+
+        if(atNum.size()> 0 && atNum!= null){
+            Integer x = Integer.valueof(atNum[0].Name);
+            x = math.mod(x,5) + 1;
+            system.debug('RR Value is --->' + x);
+            String cId = atNum[0].CaseId__c;
+            for (Id cIds : sCaseMap.keyset()){
+                If(cIds == cId)
+                {
+                    Case cRec = new Case();
+                    cRec.RR_Case__c = String.Valueof(x);
+                    cRec.Id = cId;
+                    updCaseList.add(cRec);
+                }
+            }
+            update updCaseList;
+        }
+
+    }
+
+    public static void beforeUpdate(List<Case> newListCases, Map<Id,Case> caseOldMap){
+        List<Case> resetList = new List<Case>();
+        List<Case> listOfCasesToBeTransferred =new List<Case>();
+        Set<String> exeterIds = new Set<String>();
+        Set<String> applicationIds = new Set<String>();
+        for(Case cNew: newListCases){
+            Case cOld = caseOldMap.get(cNew.Id);
+            if(cNew.Origin!=cOld.Origin)
+            {
+                listOfCasesToBeTransferred.add(cNew);
+            }
+
+            //For Dealer Advocacy Cases and IDT Cases
+            if(cNew.RecordTypeId == DAcaseRecordTypeId || cNew.RecordTypeId == IDTcaseRecordTypeId){
+                //Resetting all the fields that are populated upon Fetch Account Info,
+                //if the 'Validated Account Info' is being changed to 'No-Data Mismatches'
+                if(cNew.Validated_Account_Info__c != cOld.Validated_Account_Info__c
+                        && cNew.Validated_Account_Info__c == 'No- Data Mismatches'){
+                    resetList.add(cNew);
+                }
+                if(cNew.Validation_Counter__c == 'No' && cNew.Account_Info_Fetch_Successful__c == 'Yes'
+                            && cOld.Account_Info_Fetch_Successful__c == 'Yes'){
+                    cNew.Validation_Counter__c = 'Yes';
+                    System.debug('Validation Counter value in before update : '+ cNew.Validation_Counter__c);
+                }
+            }
+            //For Dealer Advocacy Cases
+            if(cNew.RecordTypeId == DAcaseRecordTypeId && cNew.Account_Info_Fetch_Successful__c == 'Yes' && cNew.Exeter_Account_ID__c != null 
+                && cOld.Exeter_Account_ID__c!= null && cNew.Exeter_Account_ID__c != cOld.Exeter_Account_ID__c)
+            {
+                cNew.addError('Cannot edit Account#');
+            }
+
+            //For IDTheft Cases
+            if(cNew.RecordTypeId == IDTcaseRecordTypeId){
+                if(cOld.Status == 'Open' && cNew.Status == 'New'){
+                    System.debug('Checkig : ');
+                    cNew.Investigation_Completion_Deadline1__c = CalcBusinessDays.AddBusinessDays(cNew.Investigation_Open_Dealer_Services_Date__c, 14);
+                }
+                if(cOld.Exeter_Account_ID__c == null && cOld.Application_ID__c == null
+                        && ((cNew.Exeter_Account_ID__c!= null && cNew.Application_ID__c != null)
+                        || (cNew.Exeter_Account_ID__c== null && cNew.Application_ID__c == null))
+                        && cNew.Status != 'New' && cNew.Status != 'Open' 
+                        && cNew.Resolution_Investigation__c!='Closed – Created in Error')
+                {
+                    cNew.Exeter_Account_ID__c.addError('Enter either of one values - Account# or Application#');
+                    cNew.Application_ID__c.addError('Enter either of one values - Account# or Application#');
+                }
+                /*if(cNew.Resolution_Investigation__c=='Closed – Created in Error' 
+                        && (cNew.Complaint_Received_Date__c==null || cNew.Department__c==null))
+                {
+                    cNew.Complaint_Received_Date__c.addError('Please provide Complaint Received Date and Department in the Details page');
+                    cNew.Department__c.addError('Please provide Complaint Received Date and Department in the Details page');
+                }*/
+                if(((cNew.Exeter_Account_ID__c != null && cNew.Exeter_Account_ID__c != cOld.Exeter_Account_ID__c)
+                        || (cNew.Application_ID__c != null && cNew.Application_ID__c != cOld.Application_ID__c))
+                        && cNew.Account_Info_Fetch_Successful__c != 'Yes' ){
+                    cNew.Fetch_in_Process__c = 1;
+                    cNew.Account_Info_Fetch_Successful__c = null;
+                }
+                if(cNew.Account_Info_Fetch_Successful__c == 'Yes' &&
+                        ((cNew.Exeter_Account_ID__c != null && cOld.Exeter_Account_ID__c!= null && cNew.Exeter_Account_ID__c != cOld.Exeter_Account_ID__c)
+                            || (cNew.Application_ID__c != null && cOld.Application_ID__c!=null && cNew.Application_ID__c != cOld.Application_ID__c))
+                        ){
+                    cNew.addError('Cannot edit Application# or Account#');
+                }
+
+                if( (cNew.Exeter_Account_ID__c != cOld.Exeter_Account_ID__c || cNew.Application_ID__c != cOld.Application_ID__c)
+                        && cnew.Exeter_Account_ID__c!= null && cNew.Application_ID__c!=null &&
+                        cNew.Fetch_in_Process__c == 1 && cNew.Account_Info_Fetch_Successful__c != 'Yes'){
+                    cNew.addError('Cannot edit Application# or Account# when fetch is in process OR if not successful make sure to have one value');
+                }
+                //'Out of complainace 1' field is updated to make sure the 'Case Comment' is only mandatory for the first time,
+                //if the Investigation Completion deadline is past due
+                if(cNew.Investigation_Completion_Deadline1__c<=system.today()
+                        && cNew.Case_Comments__c != cOld.Case_Comments__c && cNew.Case_Comments__c!= null
+                        && cOld.Out_of_Compliance_1__c == false){
+                    cNew.Out_of_Compliance_1__c = true;
+                }
+                // if the pending more information deadline is blank, you are closing the case and resolution is not blank then pending more information deadline is needed otherwise note
+                if(cOld.Status=='Pending More Information' && cNew.Status=='Closed- Pending Letter' && cNew.Pending_More_Information_Deadline1__c==null)
+                {
+                    cNew.addError('Please wait for Request for Information Letter Sent Date to be populated. Please verify the field from the Details section.');
+                }
+                //When the case has been moved to 'Pending more Information' and the letter has been sent out
+                //and the customer has sent out all the requested documents, then user removes the documentation needed
+                //then this should automatically change the status to 'Working'
+                if(cNew.Status == 'Pending More Information' && cOld.Documentation_Needed__c != null
+                        && cNew.Documentation_Needed__c == null){
+                    cNew.Status = 'Working';
+                }
+                //Update case status to 'Closed- Letter Sent' if the Closing Resolution Letter has been sent to customer
+                if(cNew.Status == 'Closed- Pending Letter' && cOld.Closing_Resolution_Letter_Sent_Date__c == null
+                        && cNew.Closing_Resolution_Letter_Sent_Date__c != null){
+                    cNew.Status = 'Closed- Letter Sent';
+                }   
+                if(cNew.Complaint_Received_Date__c != cOld.Complaint_Received_Date__c){
+                    cNew.Investigation_Start_Deadline1__c = CalcBusinessDays.AddBusinessDays(cNew.Complaint_Received_Date__c, 10);
+                }
+                if(cNew.Resolution_Investigation__c!=cOld.Resolution_Investigation__c
+                        &&( cNew.Resolution_Investigation__c == 'Closed – Confirmed IDT' 
+                            || cNew.Resolution_Investigation__c == 'Closed – Missing Documents' 
+                            || cNew.Resolution_Investigation__c == 'Closed – Duplicate Account' 
+                            || cNew.Resolution_Investigation__c == 'Closed – Valid Account'
+                        )) {
+                    cNew.Closing_Resolution_Letter_Deadline__c = CalcBusinessDays.AddBusinessDays(System.Today(), 10);
+                }
+                if(cNew.Request_for_Information_Letter_Sent_Date__c!=cOld.Request_for_Information_Letter_Sent_Date__c){
+                    cNew.Pending_More_Information_Deadline1__c = CalcBusinessDays.AddBusinessDays(cNew.Request_for_Information_Letter_Sent_Date__c, 30);
+                }
+                if(cNew.Status!='Closed- Pending Letter' && cNew.Status!='Closed- Letter Sent' && cNew.Pending_More_Information_Deadline1__c!=null){
+                    cNew.Days_Left_Inv_Pending_More_Deadline1__c = CalcBusinessDays.getWorkingDays(System.Today(),cNew.Pending_More_Information_Deadline1__c);
+                }
+                else{
+                    cNew.Days_Left_Inv_Pending_More_Deadline1__c = null;
+                }
+                if(cNew.Status!='Closed- Letter Sent' && cNew.Closing_Resolution_Letter_Deadline__c!=null){
+                    cNew.Days_Left_Closing_Resolution_Deadline1__c = CalcBusinessDays.getWorkingDays(System.Today(), cNew.Closing_Resolution_Letter_Deadline__c);
+                }
+                else if (!Test.isRunningTest()){
+                    cNew.Days_Left_Closing_Resolution_Deadline1__c = null;
+                }
+                if(cNew.Status!='Closed- Letter Sent' && cNew.Investigation_Completion_Deadline1__c!=null){
+                    cNew.Days_Left_Inv_Completion_Deadline1__c = CalcBusinessDays.getWorkingDays(System.Today(), cNew.Investigation_Completion_Deadline1__c);
+                }
+                else{
+                    cNew.Days_Left_Inv_Completion_Deadline1__c = null;
+                }
+
+            }
+
+            // Adding logic for Resolution-"Duplicate Missing Documents" 
+            if(cOld.Resolution_Investigation__c!= cNew.Resolution_Investigation__c && cNew.Resolution_Investigation__c == 'Closed – Duplicate Missing Documents' ){
+                if(cNew.Exeter_Account_ID__c!= null){
+                    exeterIds.add(cNew.Exeter_Account_ID__c);
+                }
+                if(cNew.Application_ID__c!= null){
+                    applicationIds.add(cNew.Application_ID__c);
+                }
+                cNew.Closing_Resolution_Letter_Deadline__c = CalcBusinessDays.AddBusinessDays(System.Today(), 10);
+            }          
+            
+        }
+        
+        if(!exeterIds.isEmpty() || !applicationIds.isEmpty()){
+            List<Case> dupMissingDocsList = CaseController.CheckPreviousCaseIsDupMissingDocuments(exeterIds,applicationIds);
+            System.debug('Dup Missing Docs List : '+ dupMissingDocsList);
+            System.debug('checking if it is empty: ' +dupMissingDocsList.isEmpty());
+            if(dupMissingDocsList.isEmpty()){
+                for(Case cNew : newListCases){
+                    cNew.addError('To select this resolution, the prior case must be a duplicate and had a closed resolution option of "Closed-Missing Documents"');
+                }
+            }
+        }
+        
+        
+        if(!listOfCasesToBeTransferred.isEmpty())
+        {
+            updateCaseToNewQueue(listOfCasesToBeTransferred);
+        }
+
+        if(!resetList.isEmpty()){
+            caseTriggerHandlerExtension.resetAccCase(resetList);
+        }
+    }
+
+    public static void updateCaseToNewQueue(List<Case> listOfCasesToBeTransferred)
+    {
+        // Get all settings once before entering the loop
+        String idTheftTypeId = GeneralSettingsService.getSettingAsString(Constants.ID_THEFT_TYPE_ID_SETTING_NAME);
+        String buybacksRecordTypeId = GeneralSettingsService.getSettingAsString(Constants.BUYBACKS_RECORD_TYPE_ID_SETTING_NAME);
+        String investigationsRecordTypeId = GeneralSettingsService.getSettingAsString(Constants.INVESTIGATIONS_RECORD_TYPE_ID_SETTING_NAME);
+        String dealerSetupTypeId = GeneralSettingsService.getSettingAsString(Constants.DEALER_SETUP_TYPE_ID_SETTING_NAME);
+        String dealerAdvocacyRecordTypeId = GeneralSettingsService.getSettingAsString(Constants.DEALER_ADVOCACY_RECORD_TYPE_ID_SETTING_NAME);
+        
+        List<Case> updateCasesRecordType=new List<Case>();
+        for(Case cs:listOfCasesToBeTransferred)
+        {
+            if(cs.Origin=='IDTheft@exeterfinance.com')
+            {
+                cs.recordTypeId = idTheftTypeId;
+                cs.Investigation_Type__c='ID Theft';
+                cs.Category__c='ID Theft';
+                cs.Status='Open';
+            }
+            else if(cs.Origin=='Buybacks@exeterfinance.com')
+            {
+                cs.recordTypeId= buybacksRecordTypeId;  
+                cs.Investigation_Type__c='Buybacks';
+                cs.Category__c='Buybacks';
+                cs.Status='Open/Working';
+            }
+            else if(cs.Origin=='Investigations@exeterfinance.com')
+            {
+                cs.recordTypeId= investigationsRecordTypeId;
+                cs.Investigation_Type__c='Investigations';
+                cs.Category__c='Investigations';
+                cs.Status='Open/Working';
+            }
+            else if(cs.Origin=='dealersetup@exeterfinance.com')
+            {
+                cs.recordTypeId= dealerSetupTypeId;
+                cs.status='New';
+                cs.Category__c='';
+                cs.Investigation_Type__c='';
+            }
+            else if(cs.Origin=='dealer@exeterfinance.com')
+            {
+                cs.recordTypeId= dealerAdvocacyRecordTypeId;
+                cs.Category__c='Dealer Advocacy';
+                cs.status='New';
+                cs.Investigation_Type__c='';
+            }
+            cs.Assigned_To__c=null;
+        }
+        
+    }
+
+    public static void afterUpdate(List<Case> caseNewMap, Map<Id,Case> caseOldMap){
+
+        Map<Id, String> exeterAccountIds = new Map<Id, String>();
+        Map<Id,String> exeterAccountIdsWithResolutionChanged = new Map<Id,String>();
+        Map<Id, String> applicationIds = new Map<Id, String>();
+        Map<Id,Case> mapOfCaseIdToCase = new Map<Id,Case>();
+        Set<Id> letterCaseSetIds = new Set<Id>();
+        Boolean makeCalloutToShaw = false;
+        Map<Id, Boolean> isAccountInfoValidatedwithPendingMap = new Map<Id, Boolean>();
+        Map<Id, Boolean> isRequestforInfoLetterTriggerMap = new Map<Id, Boolean>();
+        Map<Id, Boolean> isClosingLetterTriggerMap = new Map<Id, Boolean>();
+        Map<Id, Boolean> isClosingLetterTriggeredMap = new Map<Id, Boolean>();
+        Map<Id, Boolean> isRequestforInfoLetterSentMap = new Map<Id, Boolean>();
+        Map<Id, Boolean> isClosingLetterSentMap = new Map<Id, Boolean>();
+        
+        List<Case> Case_Lst = new List<Case>();
+
+        for(Case cNew: caseNewMap){
+            Case cOld = caseOldMap.get(cNew.Id);
+
+            //For Dealer Advocacy Cases and IDT Cases
+            if((cNew.RecordTypeId == DAcaseRecordTypeId || cNew.RecordTypeId == IDTcaseRecordTypeId)
+                && cNew.Exeter_Account_ID__c!= null && cNew.Exeter_Account_ID__c != cOld.Exeter_Account_ID__c
+                && cNew.Account_Info_Fetch_Successful__c != 'Yes')
+            {
+                exeterAccountIds.put(cNew.Id, cNew.Exeter_Account_ID__c);
+            }
+
+            //For IDTheft Cases
+            if(cNew.RecordTypeId == IDTcaseRecordTypeId){
+
+                if(cNew.Application_ID__c != null && cNew.Application_ID__c != cOld.Application_ID__c
+                        && cNew.Account_Info_Fetch_Successful__c != 'Yes'){
+                    applicationIds.put(cNew.Id, cNew.Application_ID__c);
+                }
+                if(cOld.Resolution_Investigation__c!=cNew.Resolution_Investigation__c && cNew.Resolution_Investigation__c=='Closed – Confirmed IDT' 
+                        && cNew.Exeter_Account_ID__c != null)
+                {
+                    exeterAccountIdsWithResolutionChanged.put(cNew.Id, cNew.Exeter_Account_ID__c);
+                }
+
+                //Queue Customer Letter if the status has been changed to 'Pending More Information'
+                //OR if the Resolution field is being updated to 'Closed-Duplicate Account' or 'Closed-Missing Docs' or 'Closed-Valid Acc'
+                //There are validations on the Salesforce side to make sure the account info  is being pulled
+                //and validated before making the change that would send the customer letter to queue
+                if((cNew.Resolution_Investigation__c != cOld.Resolution_Investigation__c
+                                && (cNew.Resolution_Investigation__c == 'Closed – Duplicate Account' ||
+                                cNew.Resolution_Investigation__c == 'Closed – Missing Documents' ||
+                                cNew.Resolution_Investigation__c == 'Closed – Valid Account' ||
+                                cNew.Resolution_Investigation__c == 'Closed – Confirmed IDT' ||
+                                cNew.Resolution_Investigation__c == 'Closed – Duplicate Missing Documents' )
+                        ) ||
+                        (cNew.Status != cOld.Status && cNew.Status == 'Pending More Information')
+                        ){
+                    //pass the Id of cNew to set
+                    letterCaseSetIds.add(cNew.Id);
+                }
+
+                //Check the accountId field and the   validated account  Info on the Case object
+                //If the value of the Validated Account Info is changed to Yes,
+                //then make a call to the SHAW and send information to SHAW.
+                //Trigger.new records are conveniently the "new" versions!
+
+                Boolean isOldAccountInfoMatches=false;
+                Boolean isNewAccountInfoMatches=false;
+                Boolean isOldCaseStatusPending=false;
+                Boolean isNewCaseStatusPending=false;
+
+                if(cOld.Validated_Account_Info__c!=null)
+                {
+                    isOldAccountInfoMatches = cOld.Validated_Account_Info__c.equals('Yes- Data Matches');
+                }
+                if(cNew.Validated_Account_Info__c!=null)
+                {
+                    isNewAccountInfoMatches = cNew.Validated_Account_Info__c.equals('Yes- Data Matches');
+                }
+                /*if(cOld.Status!=null)
+                {
+                    isOldCaseStatusPending=cOld.Status.equals('Pending More Information');
+                    isPreviousCaseStatusNew =cOld.Status.equals('New');
+                }*/
+                if(cNew.status!=null)
+                {
+                    isNewCaseStatusPending=cNew.status.equals('Pending More Information');
+                }
+                
+                // Check that the field was changed to the correct values
+                if(cNew.X17_digit_Account__c!=null)
+                {
+                    if(!isOldAccountInfoMatches && isNewAccountInfoMatches)
+                    {
+                        if(!system.isBatch()){
+                            Case_Lst.add(cNew);
+                        }
+                        //if the validated field is changed
+                        if(isNewAccountInfoMatches && cNew.status!= null && !cNew.status.equals('Pending More Information')){
+                            makeCalloutToShaw=true;
+                            mapOfCaseIdToCase.put(cNew.Id,cNew);
+                            //isAccountInfoValidatedwithPendingMap.put(cNew.Id, true);
+                            system.debug('Initial account info fetched and validated as yes data matches -----Information is not pending');
+                        }
+                        else if(cNew.status.equals('Pending More Information')){
+                            makeCalloutToShaw=true;
+                            isAccountInfoValidatedwithPendingMap.put(cNew.Id, true);
+                            //isRequestforInfoLetterTriggerMap.put(cNew.Id, true);
+                            mapOfCaseIdToCase.put(cNew.Id,cNew);
+                            system.debug('Initial account info fetched and validated as yes data matches and status is updated to pending more infomration at the same time -----Information is  pending 1');
+                        }
+                    }
+               // Verifying the condition for Closing Resolution Letter Data ID
+                   if(cNew.status.equals('Closed- Pending Letter')&& cNew.Resolution_Investigation__c.equals('Closed – Confirmed IDT')
+                                &&cOld.Closing_Resolution_Letter_Data_Id__c == null
+                                && cNew.Closing_Resolution_Letter_Data_Id__c!= null){
+                            System.debug('Resolution is changed and the letter is triggered');
+                            makeCalloutToShaw=true;
+                            mapOfCaseIdToCase.put(cNew.Id,cNew);
+                            isClosingLetterTriggeredMap.put(cNew.Id, true);
+                        }
+                        //
+                    if(cNew.status!=null && cOld.Status!=null && cNew.Status!=cOld.Status)
+                    {
+                        //if the status field is changed
+                        if(cNew.status.equals('Pending More Information') && cNew.Validated_Account_Info__c!=null && cNew.Validated_Account_Info__c.equals('Yes- Data Matches')){
+                            makeCalloutToShaw=true;
+                            mapOfCaseIdToCase.put(cNew.Id,cNew);
+                            isRequestforInfoLetterTriggerMap.put(cNew.Id, true);
+                        }
+                        //#3
+                        if(cNew.status.equals('Closed- Pending Letter') && cOld.Status == 'Working' 
+                        && cNew.Resolution_Investigation__c == 'Inconclusive' && cOld.Resolution_Investigation__c ==null)
+                        {
+                               System.debug('The case has been closed with resolution of Inconclusive');
+                               makeCalloutToShaw=true;
+                               mapOfCaseIdToCase.put(cNew.Id,cNew);
+                               isClosingLetterSentMap.put(cNew.Id, true);
+                        }
+                        else if(cNew.status.equals('Closed- Pending Letter')  
+                            && cNew.Resolution_Investigation__c!=cOld.Resolution_Investigation__c){
+                            System.debug('Resolution is changed and the letter is yet be triggered');
+                            makeCalloutToShaw=true;
+                            mapOfCaseIdToCase.put(cNew.Id,cNew);
+                            isClosingLetterTriggerMap.put(cNew.Id, true);
+                        }
+
+                        
+                        if(cNew.status.equals('Closed- Letter Sent') && cOld.Status == 'Closed- Pending Letter' 
+                                && cNew.Closing_Resolution_Letter_Sent_Date__c != null && cOld.Closing_Resolution_Letter_Sent_Date__c == null 
+                                && cNew.Closing_Resolution_Letter_Data_Id__c!=null){
+                            System.debug('Resolution Letter has been successfully mailed');
+                            makeCalloutToShaw=true;
+                            mapOfCaseIdToCase.put(cNew.Id,cNew);
+                            isClosingLetterSentMap.put(cNew.Id, true);
+                        }
+                        //If the case is closed with Resolution of Closed-Created in Error, trigger the Shaw Activity Code
+                        if(cNew.status.equals('Closed- Letter Sent') && cOld.Status == 'Working' 
+                                && cNew.Resolution_Investigation__c == 'Closed – Created in Error' && cOld.Resolution_Investigation__c == null){
+                            System.debug('The case has been closed with resolution of Closed-Created in Error');
+                            makeCalloutToShaw=true;
+                            mapOfCaseIdToCase.put(cNew.Id,cNew);
+                            isClosingLetterSentMap.put(cNew.Id, true);
+                        }
+                        
+                    }
+                    //When sent date is populated based on Request for Information Letter Sent Date
+                    if(cNew.Status == 'Pending More Information' && cNew.Request_for_Information_Letter_Sent_Date__c != null && cOld.Request_for_Information_Letter_Sent_Date__c == null
+                            && cNew.Request_for_Information_Letter_Data_Id__c!= null){
+                        System.debug('Request letter has been mailed to customer');
+                        makeCalloutToShaw = true;
+                        mapOfCaseIdToCase.put(cNew.Id,cNew);
+                        isRequestforInfoLetterSentMap.put(cNew.Id, true);
+                    }
+                    
+                }
+            
+            }   
+        }
+
+        if(!exeterAccountIds.isEmpty() || !applicationIds.isEmpty()){
+            system.debug(applicationIds + '===exeterAccountIds==' + exeterAccountIds);
+            caseTriggerHandlerExtension.fetchAccountInfo(exeterAccountIds, applicationIds);
+        }
+        if(!exeterAccountIdsWithResolutionChanged.isEmpty())
+        {
+            caseTriggerHandlerExtension.retrieveLoanPayoutInfoOnResolution(exeterAccountIdsWithResolutionChanged);
+        }
+        if(makeCalloutToShaw) {
+            //CaseTriggerHandlerExtension.addActivityNoteInShaw(mapOfCaseIdToCase, isAccountInfoValidatedwithPendingMap, isRequestforInfoLetterTriggerMap, isClosingLetterTriggerMap, isClosingLetterTriggeredMap, isRequestforInfoLetterSentMap, isClosingLetterSentMap); #4--
+            CaseTriggerHandlerExtension.buildSpectrumBulkAPIPayloadIDT(mapOfCaseIdToCase, isAccountInfoValidatedwithPendingMap, isRequestforInfoLetterTriggerMap, isClosingLetterTriggerMap, isClosingLetterTriggeredMap, isRequestforInfoLetterSentMap, isClosingLetterSentMap);//#4++
+        }
+        if(!letterCaseSetIds.isEmpty()){
+            CaseTriggerHandlerExtension.queueCustomerLetter(letterCaseSetIds);
+        }
+        
+        if(!Case_Lst.isEmpty()){
+            CaseTriggerHandlerExtension.reassignDuplicateCases(Case_Lst);
+        }
+    }
+}
