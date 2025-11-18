@@ -1,0 +1,66 @@
+/*
+** #1 - EFSALES-9938 - jalandry - 3/10/2025 - Identity Theft Cases: Add CBRIDTHEFT Value for Spectrum Activity Codes via BulkAPI
+ */
+public class IdTheftInvestigationCasesBulkQueueable implements Queueable, Database.AllowsCallouts {
+    private List<CaseTriggerHandlerExtension.BulkAPIDataOutEntries> bulkAPIDataOutEntriesList;
+    private Map<CaseTriggerHandlerExtension.BulkAPIDataOutEntries, Id> bulkAPIDataOutEntriesCaseIdMap;
+
+    public IdTheftInvestigationCasesBulkQueueable(List<CaseTriggerHandlerExtension.BulkAPIDataOutEntries> data, Map<CaseTriggerHandlerExtension.BulkAPIDataOutEntries, Id> mapToCaseIds) {
+        this.bulkAPIDataOutEntriesList = data;
+        this.bulkAPIDataOutEntriesCaseIdMap = mapToCaseIds;
+    }
+
+    public void execute(QueueableContext context) {
+        List<Application_Log__c> App_Log = new List<Application_Log__c>();
+        STS_Callout__mdt STS = STS_Callout__mdt.getInstance('STS_Callout');
+        String scope = 'openid profile SalesforceClient BulkUploadAPI';
+        String accessToken = GetSTSToken.GetAccessToken(scope);
+        String Endpoint = STS.BulkUpload_API_Endpoint__c;
+        for(CaseTriggerHandlerExtension.BulkAPIDataOutEntries bulkAPIDataOutEntries : this.bulkAPIDataOutEntriesList) {
+            if(accessToken == null){
+                Application_Log__c log = ApplicationLogger.Callout_App_Log('STS Callout Status','INFO', 'Failure', null,bulkAPIDataOutEntriesCaseIdMap.get(bulkAPIDataOutEntries), 'IdTheftInvestigationCasesBulkQueueable', 'Execute', 'IDTheftCases');
+                App_Log.add(log);
+            }
+            HttpRequest req = new HttpRequest();
+            req.setHeader('Authorization', 'Bearer ' + accessToken);
+            req.setEndpoint(Endpoint);
+            System.debug('Origin '+req.getHeader('Origin'));
+			req.setHeader('Origin',GeneralSettingsService.getSettingAsString(Constants.BULKUPLOAD_API_CALLOUT_ORIGIN_SETTING_NAME));
+			System.debug('Origin '+req.getHeader('Origin'));
+			System.debug('Authroization Header '+req.getHeader('Authorization') );
+			req.setHeader('Content-Type', 'application/json');
+			req.setMethod('POST');
+			System.debug('bulkAPIDataOutEntries  '+bulkAPIDataOutEntries);
+			String jsonBody = json.serializePretty(bulkAPIDataOutEntries,true);
+			System.debug('jsonBody '+jsonBody);
+			req.setBody(jsonBody);
+			System.debug('req.endpoint  '+req.getEndpoint());
+			HTTPResponse res;
+            try {
+                Http http = new Http();
+                res = http.send(req);
+
+                if(res.getStatusCode() == 200 || res.getStatusCode() == 201) {
+                    Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status','INFO', 'Success', string.valueof(res.getStatusCode()),bulkAPIDataOutEntriesCaseIdMap.get(bulkAPIDataOutEntries) , 'IdTheftInvestigationCasesBulkQueueable', 'Execute', 'IDTheftCases');
+                    App_Log.add(log);
+					System.debug('the call went through to bulkapi endpoint');
+				} 
+                else{
+                    Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status','INFO', 'Failure', string.valueof(res.getStatusCode()),bulkAPIDataOutEntriesCaseIdMap.get(bulkAPIDataOutEntries), 'IdTheftInvestigationCasesBulkQueueable', 'Execute', 'IDTheftCases');
+                    App_Log.add(log);
+                }
+            }
+            catch(Exception e)
+            {
+                System.debug('exception ocurred in callout '+e);
+			   Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status',e.getMessage(), 'Failure', string.valueof(408),bulkAPIDataOutEntriesCaseIdMap.get(bulkAPIDataOutEntries), 'IdTheftInvestiagationCasesBuilkQueueable', 'Execute', 'IDTheftCases');
+               App_Log.add(log);
+
+            }
+        }
+
+        if(!App_Log.isEmpty()){
+            insert App_Log;
+        }       
+    }
+}
