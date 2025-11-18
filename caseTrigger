@@ -1,0 +1,15 @@
+trigger caseTrigger on Case (before insert,after insert,before update,after update) {
+
+    if(trigger.isAfter && trigger.isInsert){
+        // handler logic
+        caseTriggerHandler.afterInsert(trigger.newMap);
+    }
+    if(trigger.isAfter && trigger.isUpdate){
+        // handler logic
+        caseTriggerHandler.afterUpdate(trigger.new, trigger.oldMap);
+    }
+    if(trigger.isBefore && trigger.isUpdate) {
+        // handler logic
+        caseTriggerHandler.beforeUpdate(trigger.new, trigger.oldMap);
+    }
+}
