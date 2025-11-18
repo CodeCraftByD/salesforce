@@ -1,0 +1,982 @@
+/**
+ * Created by dekhanna on 4/28/2021.
+ * 
+ * * *  Change history
+ * #1 - EFSALES-4255,4362,4256- karthik - 3/21/2022 - "Creating New Activity Codes 'IDTD','IDTM','IDRC'"
+ * #2 - EFSALES-4777 - Anusha Jasti - 4/4/2022 - Queue Customer Letter API method has been moved to Case Service Class
+ * #3 - EFSALES-5385 - Karthik - 29/6/2022 -Adding Translation Field and UFA Value to send along with Activity code and Note
+ * #4 - EFSALES-8321 - Karthik - 08/18/2023 -updated the callout to use Bearer
+ * #5 - EFSALES-8808 - Karthik - 12/08/2023 -Added custom logging for STScallout
+ * #6 - EFSALES-8920 - jalandry - 8/22/2024 - Inconclusive value for ID Theft
+ * #7 - EFSALES-9826 - jalandry - 1/10/2025 - optimization
+ * #8 - EFSALES-9879 - jalandry - 1/17/2025 - remove soql for loop addActivityNoteInShaw 
+ * #9 - EFSALES-9938 - jalandry - 3/04/2025 - Identity Theft Cases: Add CBRIDTHEFT Value for Spectrum Activity Codes via BulkAPI
+ * #10 - EFSALES-10177 - Susmitha - 7/17/2025 - Remove SOQLs from For Loop, in the method fetchAccountInfo and preserve functionality inside for loop for call.
+ * #11 - EFSALES-10380 - Susmitha -9/24/2025 - Update the SpectrumAccountNumber to Null in the BulkAPIData.
+*/
+
+public class CaseTriggerHandlerExtension {
+
+    private static Id IDTcaseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByDeveloperName().get('ID_Theft').getRecordTypeId();
+    private static Id DAcaseRecordTypeId = Schema.SObjectType.Case.getRecordTypeInfosByDeveloperName().get('Dealer_Advocacy').getRecordTypeId();
+
+    public static final String SOURCE_SYSTEM_NAME = 'Salesforce';
+    public static final String SOURCE_ID_COLUMN_NAME = 'CaseNumber';
+
+    static Map<Id, CaseComment> caseIDToRecentCommentMap;
+
+    public static void buildSpectrumBulkAPIPayloadIDT(Map<Id,Case> mapOfCaseIdsToCase, Map<Id, Boolean> isAccountInfoValidatedwithPendingMap, Map<Id, Boolean> isRequestforInfoLetterTriggerMap, Map<Id, Boolean> isClosingLetterTriggerMap, Map<Id, Boolean> isClosingLetterTriggeredMap, Map<Id, Boolean> isRequestforInfoLetterSentMap, Map<Id, Boolean> isClosingLetterSentMap)
+    {
+        List<BulkAPIDataOutEntries> bulkAPIDataOutEntriesList = new List<BulkAPIDataOutEntries>();
+        Map<BulkAPIDataOutEntries, Id> BulkAPIDataOutEntriesCaseIdMap = new Map<BulkAPIDataOutEntries, Id>();
+
+        caseIDToRecentCommentMap = buildMapCaseComment(mapOfCaseIdsToCase.keyset());
+
+        //spectrum metadata
+        Map<String, Spectrum_Activity_Code__mdt> activityCodesMap = Spectrum_Activity_Code__mdt.getAll();
+
+
+        for(Case idtCase: mapOfCaseIdsToCase.values()){
+
+            Boolean isAccountInfoValidatedwithPending = false;
+            Boolean isRequestforInfoLetterTrigger = false;
+            Boolean isClosingLetterTrigger = false;
+            Boolean isClosingLetterTriggered = false;
+            Boolean isRequestforInfoLetterSent = false;
+            Boolean isClosingLetterSent = false;
+
+            if(isAccountInfoValidatedwithPendingMap!= null && isAccountInfoValidatedwithPendingMap.containskey(idtCase.Id)){
+                isAccountInfoValidatedwithPending = isAccountInfoValidatedwithPendingMap.get(idtCase.Id);
+            }
+            if(isRequestforInfoLetterTriggerMap!= null && isRequestforInfoLetterTriggerMap.containskey(idtCase.Id)){
+                isRequestforInfoLetterTrigger = isRequestforInfoLetterTriggerMap.get(idtCase.Id);
+            }
+            if(isClosingLetterTriggerMap!= null && isClosingLetterTriggerMap.containskey(idtCase.Id)){
+                isClosingLetterTrigger = isClosingLetterTriggerMap.get(idtCase.Id);
+            }
+            if(isClosingLetterTriggeredMap!= null && isClosingLetterTriggeredMap.containskey(idtCase.Id)){
+                isClosingLetterTriggered = isClosingLetterTriggeredMap.get(idtCase.Id);
+            }
+            if(isRequestforInfoLetterSentMap!= null && isRequestforInfoLetterSentMap.containskey(idtCase.Id)){
+                isRequestforInfoLetterSent = isRequestforInfoLetterSentMap.get(idtCase.Id);
+            }
+            if(isClosingLetterSentMap!= null && isClosingLetterSentMap.containskey(idtCase.Id)){
+                isClosingLetterSent = isClosingLetterSentMap.get(idtCase.Id);
+            }
+
+            //create dataout entries
+            BulkAPIDataOutEntries bulkDataOutIDT = new BulkAPIDataOutEntries();
+            bulkDataOutIDT.Entries = new List<DataOut>();
+
+            //build entries
+            if(!isAccountInfoValidatedwithPending && !isRequestforInfoLetterTrigger && !isClosingLetterTrigger 
+                && !isClosingLetterTriggered && !isRequestforInfoLetterSent && !isClosingLetterSent){
+
+                    Spectrum_Activity_Code__mdt idtoActCode = Spectrum_Activity_Code__mdt.getInstance('IDTO');
+                    Spectrum_Activity_Note__mdt idtoActNote = Spectrum_Activity_Note__mdt.getInstance(idtoActCode.Spectrum_Activity_Note__c);
+
+                    DataOut activityEntry = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                    activityEntry.ActivityCode = idtoActCode.Activity_Code__c;
+                    activityEntry.DataBody = buildBodyForBulkUploadFileTypeActivity(idtoActCode.ClearQueueGroup__c, idtoActCode.QueueGroup__c, idtoActNote, idtCase);
+                        
+                    system.debug('activityEntry = ' + activityEntry);
+                    bulkDataOutIDT.Entries.add(activityEntry);
+
+                    if(idtoActCode.Change_Code_Count__c>0){
+                        DataOut nonMonEntry = new DataOut(idtCase, BulkType.NONMONETARY.name());
+                        nonMonEntry.DataBody = buildBodyForBulkUploadFileTypeNonMonetary(idtoActCode);
+                            
+                        system.debug('nonMonEntry=' + nonMonEntry);
+                        bulkDataOutIDT.Entries.add(nonMonEntry);
+                    }
+            }
+            else if(isAccountInfoValidatedwithPending){
+                //IDTO
+                Spectrum_Activity_Code__mdt idtoActCode = Spectrum_Activity_Code__mdt.getInstance('IDTO');
+                Spectrum_Activity_Note__mdt idtoActNote = Spectrum_Activity_Note__mdt.getInstance(idtoActCode.Spectrum_Activity_Note__c);
+
+                DataOut activityEntry = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                activityEntry.ActivityCode = idtoActCode.Activity_Code__c;
+                activityEntry.DataBody = buildBodyForBulkUploadFileTypeActivity(idtoActCode.ClearQueueGroup__c, idtoActCode.QueueGroup__c, idtoActNote, idtCase);
+                        
+                system.debug('activityEntry = ' + activityEntry);
+                bulkDataOutIDT.Entries.add(activityEntry);
+
+                if(idtoActCode.Change_Code_Count__c>0){
+                    DataOut nonMonEntry = new DataOut(idtCase, BulkType.NONMONETARY.name());
+                    nonMonEntry.DataBody = buildBodyForBulkUploadFileTypeNonMonetary(idtoActCode);
+                            
+                    system.debug('nonMonEntry=' + nonMonEntry);
+                    bulkDataOutIDT.Entries.add(nonMonEntry);
+                }
+
+                //IDTL
+                Spectrum_Activity_Code__mdt idtlActCode = Spectrum_Activity_Code__mdt.getInstance('InfoLetterReqSubmit');
+                Spectrum_Activity_Note__mdt idtlActNote = Spectrum_Activity_Note__mdt.getInstance(idtlActCode.Spectrum_Activity_Note__c);
+
+                DataOut activityEntryIDTL = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                activityEntryIDTL.ActivityCode = idtlActCode.Activity_Code__c;
+                activityEntryIDTL.DataBody = buildBodyForBulkUploadFileTypeActivity(idtlActCode.ClearQueueGroup__c, idtlActCode.QueueGroup__c, idtlActNote, idtCase);
+                bulkDataOutIDT.Entries.add(activityEntryIDTL);
+                
+            }
+            else if(isRequestforInfoLetterTrigger){
+                //Activity.ActivityCode = 'IDTL'; InfoLetterReqSubmit
+                Spectrum_Activity_Code__mdt idtoActCode = Spectrum_Activity_Code__mdt.getInstance('InfoLetterReqSubmit');
+                Spectrum_Activity_Note__mdt idtoActNote = Spectrum_Activity_Note__mdt.getInstance(idtoActCode.Spectrum_Activity_Note__c);
+
+                DataOut activityEntry = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                activityEntry.ActivityCode = idtoActCode.Activity_Code__c;
+                activityEntry.DataBody = buildBodyForBulkUploadFileTypeActivity(idtoActCode.ClearQueueGroup__c, idtoActCode.QueueGroup__c, idtoActNote, idtCase);
+                bulkDataOutIDT.Entries.add(activityEntry);
+
+            }
+            else if(isClosingLetterTrigger){
+                String resolutionAbbrv = idtCase.Resolution_Investigation__c;
+                String spcActCodeMD = 'LetterSubmit'+ resolutionAbbrv.substringAfterLast('\u2013');
+                String spcActCodeMDDevName = spcActCodeMD.replace(' ', '_');
+                system.debug('spcActCodeMDDevName = ' + spcActCodeMDDevName);
+
+                Spectrum_Activity_Code__mdt idtoActCode = Spectrum_Activity_Code__mdt.getInstance(spcActCodeMDDevName);
+                if(idtoActCode!=null){
+                    Spectrum_Activity_Note__mdt idtoActNote = Spectrum_Activity_Note__mdt.getInstance(idtoActCode.Spectrum_Activity_Note__c);
+
+                    DataOut activityEntry = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                    activityEntry.ActivityCode = idtoActCode.Activity_Code__c;
+                    activityEntry.DataBody = buildBodyForBulkUploadFileTypeActivity(idtoActCode.ClearQueueGroup__c, idtoActCode.QueueGroup__c, idtoActNote, idtCase);
+                    bulkDataOutIDT.Entries.add(activityEntry);
+
+                    if(idtoActCode.Change_Code_Count__c>0){
+                        DataOut nonMonEntry = new DataOut(idtCase, BulkType.NONMONETARY.name());
+                        nonMonEntry.DataBody = buildBodyForBulkUploadFileTypeNonMonetary(idtoActCode);
+                        bulkDataOutIDT.Entries.add(nonMonEntry);
+                    }
+                }
+            }
+            else if(isClosingLetterTriggered){
+                if(idtCase.Resolution_Investigation__c == 'Closed – Confirmed IDT'){
+                    system.debug('DEMSSN');
+                    if((idtCase.Who_is_Submitting_the_Claim__c == 'Borrower' && idtCase.On_Behalf_of__c == null )||((idtCase.Who_is_Submitting_the_Claim__c == 'Other' && idtCase.On_Behalf_of__c == 'Borrower' ) )) {
+                        //DEMSSN_Borrower
+                        Spectrum_Activity_Code__mdt idtoActCode = Spectrum_Activity_Code__mdt.getInstance('DEMSSN_Borrower');
+                        Spectrum_Activity_Note__mdt idtoActNote = Spectrum_Activity_Note__mdt.getInstance(idtoActCode.Spectrum_Activity_Note__c);
+
+                        DataOut activityEntry = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                        activityEntry.ActivityCode = idtoActCode.Activity_Code__c;
+                        activityEntry.DataBody = buildBodyForBulkUploadFileTypeActivity(idtoActCode.ClearQueueGroup__c, idtoActCode.QueueGroup__c, idtoActNote, idtCase);
+                        bulkDataOutIDT.Entries.add(activityEntry);
+
+                        if(idtoActCode.Change_Code_Count__c>0){
+                            DataOut nonMonEntry = new DataOut(idtCase, BulkType.NONMONETARY.name());
+                            nonMonEntry.DataBody = buildBodyForBulkUploadFileTypeNonMonetary(idtoActCode);
+                            bulkDataOutIDT.Entries.add(nonMonEntry);
+                        }
+                    }
+                    else if((idtCase.Who_is_Submitting_the_Claim__c == 'Co-Borrower' && idtCase.On_Behalf_of__c == null )||((idtCase.Who_is_Submitting_the_Claim__c == 'Other' && idtCase.On_Behalf_of__c == 'Co-Borrower' ) )) {
+                        //DEMSSN_Borrower
+                        Spectrum_Activity_Code__mdt idtoActCode = Spectrum_Activity_Code__mdt.getInstance('DEMSSN_Co_Borrower');
+                        Spectrum_Activity_Note__mdt idtoActNote = Spectrum_Activity_Note__mdt.getInstance(idtoActCode.Spectrum_Activity_Note__c);
+
+                        DataOut activityEntry = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                        activityEntry.ActivityCode = idtoActCode.Activity_Code__c;
+                        activityEntry.DataBody = buildBodyForBulkUploadFileTypeActivity(idtoActCode.ClearQueueGroup__c, idtoActCode.QueueGroup__c, idtoActNote, idtCase);
+                        bulkDataOutIDT.Entries.add(activityEntry);
+
+                        if(idtoActCode.Change_Code_Count__c>0){
+                            DataOut nonMonEntry = new DataOut(idtCase, BulkType.NONMONETARY.name());
+                            nonMonEntry.DataBody = buildBodyForBulkUploadFileTypeNonMonetary(idtoActCode);
+                            bulkDataOutIDT.Entries.add(nonMonEntry);
+                        }
+                    }
+                }
+            }
+            else if(isRequestforInfoLetterSent){
+                //Activity.ActivityCode = 'IDTL'; InfoLetterReqSent
+                Spectrum_Activity_Code__mdt idtoActCode = Spectrum_Activity_Code__mdt.getInstance('InfoLetterReqSent');
+                Spectrum_Activity_Note__mdt idtoActNote = Spectrum_Activity_Note__mdt.getInstance(idtoActCode.Spectrum_Activity_Note__c);
+
+                DataOut activityEntry = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                activityEntry.ActivityCode = idtoActCode.Activity_Code__c;
+                activityEntry.DataBody = buildBodyForBulkUploadFileTypeActivity(idtoActCode.ClearQueueGroup__c, idtoActCode.QueueGroup__c, idtoActNote, idtCase);
+                bulkDataOutIDT.Entries.add(activityEntry);
+
+            }
+            else if(isClosingLetterSent){
+                String resolutionAbbrv = idtCase.Resolution_Investigation__c;
+                String spcActCodeMD = 'LetterSent';
+                if(resolutionAbbrv.contains('\u2013')){
+                    spcActCodeMD = spcActCodeMD + resolutionAbbrv.substringAfterLast('\u2013');
+                }
+                else{
+                    spcActCodeMD = spcActCodeMD + '_' + resolutionAbbrv;
+                }
+                
+                String spcActCodeMDDevName = spcActCodeMD.replace(' ', '_');
+                system.debug('spcActCodeMDDevName = ' + spcActCodeMDDevName);
+
+                Spectrum_Activity_Code__mdt idtoActCode = Spectrum_Activity_Code__mdt.getInstance(spcActCodeMDDevName);
+                Spectrum_Activity_Note__mdt idtoActNote = Spectrum_Activity_Note__mdt.getInstance(idtoActCode.Spectrum_Activity_Note__c);
+
+                DataOut activityEntry = new DataOut(idtCase, BulkType.ACTIVITY.name());
+                activityEntry.ActivityCode = idtoActCode.Activity_Code__c;
+                activityEntry.DataBody = buildBodyForBulkUploadFileTypeActivity(idtoActCode.ClearQueueGroup__c, idtoActCode.QueueGroup__c, idtoActNote, idtCase);
+                bulkDataOutIDT.Entries.add(activityEntry);
+
+                if(idtoActCode.Change_Code_Count__c>0){
+                    DataOut nonMonEntry = new DataOut(idtCase, BulkType.NONMONETARY.name());
+                    nonMonEntry.DataBody = buildBodyForBulkUploadFileTypeNonMonetary(idtoActCode);
+                    bulkDataOutIDT.Entries.add(nonMonEntry);
+                }
+            }
+            
+            bulkAPIDataOutEntriesList.add(bulkDataOutIDT);
+            BulkAPIDataOutEntriesCaseIdMap.put(bulkDataOutIDT, idtCase.Id);
+        } //end for
+        
+        if(bulkAPIDataOutEntriesList.size() > 0)
+        {
+            System.debug('List of bulkDataOutIDT to be sent via bulkAPIUpload '+ bulkAPIDataOutEntriesList);
+            System.enqueueJob(new IdTheftInvestigationCasesBulkQueueable(bulkAPIDataOutEntriesList, BulkAPIDataOutEntriesCaseIdMap));
+        }
+
+    }
+
+    public static String buildBodyForBulkUploadFileTypeActivity (Boolean ClearQueueGroup, String QueueGroup, Spectrum_Activity_Note__mdt activityNote, Case c){
+        ActivityChange activityBody = new ActivityChange();
+        if(ClearQueueGroup){
+            activityBody.ClearQueueGroup = QueueGroup;
+        }
+        
+        //build note portion of Activity Data Body
+        activityBody.Notes = activityNote.Note_Start__c + ' ';
+
+        if(activityNote.On_Date__c == 'Today'){
+            activityBody.Notes = activityBody.Notes + String.valueOf(Date.Today());
+        }
+        else if (activityNote.On_Date__c == 'ClosingResolutionLetterSentDate'){
+            activityBody.Notes = activityBody.Notes + String.valueOf(c.Closing_Resolution_Letter_Sent_Date__c);
+        }
+        else if (activityNote.On_Date__c == 'InvestigationOpenDate'){
+            activityBody.Notes = activityBody.Notes + String.valueOf(c.Investigation_Open_Dealer_Services_Date__c);
+        }
+        else if (activityNote.On_Date__c == 'RequestForInformationLetterSentDate'){
+            activityBody.Notes = activityBody.Notes + String.valueOf(c.Request_for_Information_Letter_Sent_Date__c);
+        }
+
+        if(activityNote.forClaimant__c){
+            String claimant;
+            if (c.Who_is_Submitting_the_Claim__c=='Borrower') {
+                claimant = c.Borrower__c;
+            }
+            else if(c.Who_is_Submitting_the_Claim__c=='Co-Borrower') {
+                claimant = c.CoBorrower__c;        
+            }
+            else if(c.Who_is_Submitting_the_Claim__c=='Other') {
+                claimant = c.Other_Claimant__c;
+            }
+            activityBody.Notes = activityBody.Notes + ' for ' + claimant;
+        }
+
+        if(activityNote.appendLatestComment__c){
+            activityBody.Notes = activityBody.Notes +' '+'\n'+ caseIDToRecentCommentMap.get(c.Id).CommentBody;
+        }
+
+        
+        system.debug('actbdNotes = ' + activityBody.Notes);
+        
+        return json.serializePretty(activityBody);
+    }
+
+    public static String buildBodyForBulkUploadFileTypeNonMonetary(Spectrum_Activity_Code__mdt activityCode){
+        List<NonMonetaryChange> changePairLst = new List<NonMonetaryChange>();
+        NonMonetaryChange changePair;
+        if(activityCode.Change_Code_Count__c>0){
+            changePair = new NonMonetaryChange();
+            //changePair.ChangeCodeId = activityCode.Change_Code_1__r.Change_Code_ID__c;
+            changePair.ChangeCodeId = Spectrum_Change_Code__mdt.getInstance(activityCode.Change_Code_1__c).Change_Code_ID__c;
+            changePair.ChangeData = Spectrum_Change_Data__mdt.getInstance(activityCode.Change_Data_1__c).ChangeData__c;
+            changePairLst.add(changePair);
+        }
+        if(activityCode.Change_Code_Count__c>1){
+            changePair = new NonMonetaryChange();
+            changePair.ChangeCodeId = Spectrum_Change_Code__mdt.getInstance(activityCode.Change_Code_2__c).Change_Code_ID__c;
+            changePair.ChangeData = Spectrum_Change_Data__mdt.getInstance(activityCode.Change_Data_2__c).ChangeData__c;
+            changePairLst.add(changePair);
+        }
+        if(activityCode.Change_Code_Count__c>2){
+            changePair = new NonMonetaryChange();
+            changePair.ChangeCodeId = Spectrum_Change_Code__mdt.getInstance(activityCode.Change_Code_3__c).Change_Code_ID__c;
+            changePair.ChangeData = Spectrum_Change_Data__mdt.getInstance(activityCode.Change_Data_3__c).ChangeData__c;
+            changePairLst.add(changePair);
+        }
+        String changePairData = json.serializePretty(changePairLst);
+        system.debug('nonmon serialized='+ changePairData);
+
+        return changePairData;
+    }
+
+    /*
+     This method is responsible to make a callout to the SHaw.
+     We will be creating a New Activity Note in shaw if the Account Info is valid
+     */
+
+    /* public static void addActivityNoteInShaw( Map<Id,Case> mapOfCaseIdsToCase, Map<Id, Boolean> isAccountInfoValidatedwithPendingMap, Map<Id, Boolean> isRequestforInfoLetterTriggerMap, Map<Id, Boolean> isClosingLetterTriggerMap, Map<Id, Boolean> isClosingLetterTriggeredMap, Map<Id, Boolean> isRequestforInfoLetterSentMap, Map<Id, Boolean> isClosingLetterSentMap)
+    {
+        //Instantiate a new http object
+        Set<Id> listOfCaseIds=new Set<Id>();
+        List<ActivityNoteWrapper> listofActivityNoteWrappers=new List<ActivityNoteWrapper>();
+        listOfCaseIds = mapOfCaseIdsToCase.keySet();   
+        Map<ActivityNoteWrapper, Id> ActivityWrap_Case_Map = new Map<ActivityNoteWrapper, Id>();
+        //Map<Id, CaseComment> caseIDToRecentCommentMap = buildMapCaseComment(mapOfCaseIdsToCase.keyset()); //8++
+        caseIDToRecentCommentMap = buildMapCaseComment(mapOfCaseIdsToCase.keyset()); 
+        
+        for(Id caseId:listOfCaseIds)
+        {
+
+            Case c = mapOfCaseIdsToCase.get(caseId);
+            Long exeterAccountId = Long.valueOf(mapOfCaseIdsToCase.get(caseId).X17_digit_Account__c);
+            Integer caseNumber = Integer.valueOf(mapOfCaseIdsToCase.get(caseId).CaseNumber);
+            Date investigationOpenDate = mapOfCaseIdsToCase.get(caseId).Investigation_Open_Dealer_Services_Date__c;
+            Date requestForInformationLetterSentDate = mapOfCaseIdsToCase.get(caseId).Request_for_Information_Letter_Sent_Date__c;
+            Date closingResolutionLetterSentDate = mapOfCaseIdsToCase.get(caseId).Closing_Resolution_Letter_Sent_Date__c;
+            String letterType = mapOfCaseIdsToCase.get(caseId).FSSI_Letter_Type__c;
+            //String status = mapOfCaseIdsToCase.get(caseId).Status;
+            String resolution = mapOfCaseIdsToCase.get(caseId).Resolution_Investigation__c;
+            String whoisSubmittingtheClaim = mapOfCaseIdsToCase.get(caseId).Who_is_Submitting_the_Claim__c;
+            String claimant;
+            Boolean isAccountInfoValidatedwithPending = false;
+            Boolean isRequestforInfoLetterTrigger = false;
+            Boolean isClosingLetterTrigger = false;
+            Boolean isClosingLetterTriggered = false;
+            Boolean isRequestforInfoLetterSent = false;
+            Boolean isClosingLetterSent = false;
+            //Determine who the claimant is based on who is submitting the claim
+            if(WhoisSubmittingtheClaim == 'Borrower'){
+                claimant = mapOfCaseIdsToCase.get(caseId).Borrower__c;
+            }
+            else if(WhoisSubmittingtheClaim == 'Co-Borrower'){
+                claimant = mapOfCaseIdsToCase.get(caseId).CoBorrower__c;
+            }
+            else if(WhoisSubmittingtheClaim == 'Other'){
+                claimant = mapOfCaseIdsToCase.get(caseId).Other_Claimant__c;
+            }
+
+            if(isAccountInfoValidatedwithPendingMap!= null && isAccountInfoValidatedwithPendingMap.containskey(caseId)){
+                isAccountInfoValidatedwithPending = isAccountInfoValidatedwithPendingMap.get(caseId);
+            }
+            if(isRequestforInfoLetterTriggerMap!= null && isRequestforInfoLetterTriggerMap.containskey(caseId)){
+                isRequestforInfoLetterTrigger = isRequestforInfoLetterTriggerMap.get(caseId);
+            }
+            if(isClosingLetterTriggerMap!= null && isClosingLetterTriggerMap.containskey(caseId)){
+                isClosingLetterTrigger = isClosingLetterTriggerMap.get(caseId);
+            }
+            if(isClosingLetterTriggeredMap!= null && isClosingLetterTriggeredMap.containskey(caseId)){
+                isClosingLetterTriggered = isClosingLetterTriggeredMap.get(caseId);
+            }
+            if(isRequestforInfoLetterSentMap!= null && isRequestforInfoLetterSentMap.containskey(caseId)){
+                isRequestforInfoLetterSent = isRequestforInfoLetterSentMap.get(caseId);
+            }
+            if(isClosingLetterSentMap!= null && isClosingLetterSentMap.containskey(caseId)){
+                isClosingLetterSent = isClosingLetterSentMap.get(caseId);
+            }
+            
+            //Specify the body to be send (contains JSON data)
+            ActivityNoteWrapper activityNoteWrapper = new ActivityNoteWrapper();
+            ActivityNoteWrapper.CollectionOuts  = new List<CollectionsOutData>();
+            ActivityNoteWrapper.ActivityOuts = new List<ActivityNote>();
+            ActivityNote Activity = new ActivityNote();
+
+            if(!isAccountInfoValidatedwithPending && !isRequestforInfoLetterTrigger && !isClosingLetterTrigger 
+                    && !isClosingLetterTriggered && !isRequestforInfoLetterSent && !isClosingLetterSent){
+                Activity.Note = 'Identity Theft Inv. Request Received on '+ String.valueOf(investigationOpenDate).removeEnd('00:00:00')+ ' for '+ claimant;
+                Activity.ActivityCode = 'IDTO';
+                activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9003', 'ACTIVE'));
+                activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'Y'));
+                System.debug('first all not ActivityNoteWrapper.Note '+ Activity.Note);
+            }
+            else if(isAccountInfoValidatedwithPending){
+                //We need to send IDTO for case opening and IDTL for triggering the Request for Information Letter
+                for(integer i=1; i<=2; i++){
+                    
+                    activityNoteWrapper = new ActivityNoteWrapper();
+                    ActivityNoteWrapper.ActivityOuts = new List<ActivityNote>();
+                    Activity = new ActivityNote();
+                    ActivityNoteWrapper.CollectionOuts  = new List<CollectionsOutData>();
+                    if(i==1){
+                        Activity.Note = 'Identity Theft Inv. Request Received on '+ String.valueOf(investigationOpenDate).removeEnd('00:00:00')+ ' for '+ claimant;
+                        Activity.ActivityCode = 'IDTO';
+                        activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9003', 'ACTIVE'));
+                        activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'Y'));                   
+                        System.debug('first Note '+ Activity.Note);
+                    }
+                    else {
+                        Activity.Note = 'ID Theft_Request for Documents Letter has been submitted on '+ String.valueOf(Date.Today()).removeEnd('00:00:00') + ' for '+ claimant;
+                        Activity.ActivityCode = 'IDTL';
+                        //activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                        System.debug('second note : '+ Activity.Note);
+                    }
+                    Activity.AccountID = exeterAccountId;
+                    Activity.AppSourceIdName = 'CaseNumber';
+                    Activity.AppSourceID = caseNumber;
+                    Activity.AppSourceCreatedDate = Date.Today();
+                    Activity.AppSourceLabel = 'Salesforce';
+                    Activity.SourceID = 0;
+                    activityNoteWrapper.ActivityOuts.add(Activity);
+                    listofActivityNoteWrappers.add(activityNoteWrapper);
+                    System.debug('if is valid account 2 codes ActivityNoteWrapper.Note '+ Activity.Note);
+                    ActivityWrap_Case_Map.put(activityNoteWrapper, caseId);
+                }
+            }
+            else if(isRequestforInfoLetterTrigger){
+                Activity.Note = 'ID Theft_Request for Documents Letter has been submitted on '+ String.valueOf(Date.Today()).removeEnd('00:00:00')+ ' for '+ claimant;
+                Activity.ActivityCode = 'IDTL';
+                //activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                System.debug('isRequestforInfoLetterTrigger ActivityNoteWrapper.Note '+ Activity.Note);
+            }
+            else if(isClosingLetterTrigger){
+                if(resolution == 'Closed – Valid Account'){
+                    Activity.Note = 'ID Theft_Closed Valid Account IDT Claim Letter has been submitted on '+ String.valueOf(Date.Today()).removeEnd('00:00:00')+ ' for '+ claimant +' '+'\n'+ caseIDToRecentCommentMap.get(caseId).CommentBody; //retrieveLatestInternalComments(caseId);
+                    Activity.ActivityCode = 'IDTC';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                }
+                if(resolution == 'Closed – Confirmed IDT'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Closed-Confirmed IDT. Confirmed Letter has been submitted on '+ String.valueOf(Date.Today()).removeEnd('00:00:00')+ ' for '+ claimant +' '+'\n'+ caseIDToRecentCommentMap.get(caseId).CommentBody; // retrieveLatestInternalComments(caseId);
+                    Activity.ActivityCode = 'IDTX';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9003', 'CONFIRM'));
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9004', 'Y'));                    
+                    System.debug('isClosingLetterTrigger ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+                if(resolution == 'Closed – Duplicate Account'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Closed-Duplicate Complete IDT. Duplicate Request Letter has been submitted on '+ String.valueOf(Date.Today()).removeEnd('00:00:00')+ ' for '+ claimant +' '+  '\n'+ caseIDToRecentCommentMap.get(caseId).CommentBody; //retrieveLatestInternalComments(caseId);
+                    Activity.ActivityCode = 'IDTD';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterTrigger ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+                if(resolution == 'Closed – Missing Documents'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Closed-Missing Documents. Incomplete Docs Letter has been submitted on '+ String.valueOf(Date.Today()).removeEnd('00:00:00')+ ' for '+ claimant +' '+  '\n'+ caseIDToRecentCommentMap.get(caseId).CommentBody; //retrieveLatestInternalComments(caseId);
+                    Activity.ActivityCode = 'IDTM';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterTrigger ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+                if(resolution == 'Closed – Duplicate Missing Documents'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Closed-Duplicate Missing Documents.  Second Duplicate Claims Letter has been submitted on '+ String.valueOf(Date.Today()).removeEnd('00:00:00')+ ' for '+ claimant +' '+  '\n'+ caseIDToRecentCommentMap.get(caseId).CommentBody; //retrieveLatestInternalComments(caseId);
+                    Activity.ActivityCode = 'IDRC';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterTrigger ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+            }            
+            else if(isClosingLetterTriggered){
+                    if(resolution == 'Closed – Confirmed IDT'){
+                    Activity.Note = 'Confirmed IDT- Please remove SSN for customer and PII related to claimant for the borrower, coborrower or Other';
+                    Activity.ActivityCode = 'DEMSSN';
+                        if((c.Who_is_Submitting_the_Claim__c == 'Borrower' && c.On_Behalf_of__c == null )||((c.Who_is_Submitting_the_Claim__c == 'Other' && c.On_Behalf_of__c == 'Borrower' ) )) {
+                            activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9005', 'REQUEST'));
+                            activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9006', 'BO'));
+                            activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9007', '999999999'));
+                            }
+                        else if((c.Who_is_Submitting_the_Claim__c == 'Co-Borrower' && c.On_Behalf_of__c == null )||((c.Who_is_Submitting_the_Claim__c == 'Other' && c.On_Behalf_of__c == 'Co-Borrower' ) )) {
+                            activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9005', 'REQUEST'));
+                            activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9006', 'COB'));
+                            activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9007', '999999999'));
+                            }
+                        
+                    System.debug('isClosingLetterTriggered ActivityNoteWrapper.Note '+ Activity.Note);     
+                }
+            }
+            else if(isRequestforInfoLetterSent){
+                Activity.Note = 'ID Theft_Request for Documents Letter has been mailed on '+ String.valueOf(requestForInformationLetterSentDate).removeEnd('00:00:00')+ ' for '+ claimant;
+                Activity.ActivityCode = 'IDTL';
+                //activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                System.debug('isRequestforInfoLetterTrigger ActivityNoteWrapper.Note '+ Activity.Note);
+            }
+            else if(isClosingLetterSent){
+                if(resolution == 'Closed – Valid Account'){
+                    Activity.Note = 'ID Theft_Closed Valid Account IDT Claim Letter has been mailed on '+String.valueOf(closingResolutionLetterSentDate).removeEnd('00:00:00')+ ' for '+ claimant;
+                    Activity.ActivityCode = 'IDLM';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterSent ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+                if(resolution == 'Closed – Confirmed IDT'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Closed-Confirmed IDT.  Confirmed Letter has been mailed on '+String.valueOf(closingResolutionLetterSentDate).removeEnd('00:00:00')+ ' for '+ claimant;
+                    Activity.ActivityCode = 'IDTX';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9003', 'CONFIRM'));
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9004', 'Y'));
+                    System.debug('isClosingLetterSent ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+                if(resolution == 'Closed – Duplicate Account'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Closed-Duplicate Complete IDT. Duplicate Request Letter has been mailed on '+String.valueOf(closingResolutionLetterSentDate).removeEnd('00:00:00')+ ' for '+ claimant;
+                    Activity.ActivityCode = 'IDTD';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterSent ActivityNoteWrapper.Note '+ Activity.Note);
+                } 
+                if(resolution == 'Closed – Missing Documents'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Closed-Missing Documents. Incomplete Docs Letter has been mailed on '+String.valueOf(closingResolutionLetterSentDate).removeEnd('00:00:00')+ ' for '+ claimant;
+                    Activity.ActivityCode = 'IDTM';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterSent ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+                if(resolution == 'Closed – Duplicate Missing Documents'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Closed-Duplicate Missing Documents.  Second Duplicate Claims Letter has been mailed on '+String.valueOf(closingResolutionLetterSentDate).removeEnd('00:00:00')+ ' for '+ claimant;
+                    Activity.ActivityCode = 'IDRC';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterSent ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+                if(resolution == 'Closed – Created in Error'){
+                    Activity.Note = 'ID Theft_Closed Due to Created in Error on '+ String.valueOf(Date.Today()).removeEnd('00:00:00')+ ' for '+ claimant +' '+'\n'+ caseIDToRecentCommentMap.get(caseId).CommentBody; //retrieveLatestInternalComments(caseId);
+                    Activity.ActivityCode = 'IDTE';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterTrigger ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+                if(resolution == 'Inconclusive'){
+                    Activity.Note = 'ID Theft case closed with resolution option of Inconclusive on '+ String.valueOf(Date.Today()).removeEnd('00:00:00')+ ' for '+ claimant;
+                    Activity.ActivityCode = 'IDIN';
+                    activityNoteWrapper.CollectionOuts.add(getActivityNoteWrapper(exeterAccountId, caseNumber, '9002', 'N'));
+                    System.debug('isClosingLetterTrigger ActivityNoteWrapper.Note '+ Activity.Note);
+                }
+        
+                
+            }
+            if(!isAccountInfoValidatedwithPending){
+                Activity.AccountID = exeterAccountId;
+                Activity.AppSourceIdName = 'CaseNumber';
+                Activity.AppSourceID = caseNumber;
+                Activity.AppSourceCreatedDate = Date.Today();
+                Activity.AppSourceLabel = 'Salesforce';
+                Activity.SourceID = 0;
+                activityNoteWrapper.ActivityOuts.add(Activity);
+                listofActivityNoteWrappers.add(activityNoteWrapper);
+                ActivityWrap_Case_Map.put(activityNoteWrapper, caseId);
+            }        
+        }
+        if(listofActivityNoteWrappers.size() > 0)
+        {
+            System.debug('List of ActivityNotes to be sent to shaw '+ listofActivityNoteWrappers);
+            System.debug('Number of ActivityNotes to be sent to shaw '+ listofActivityNoteWrappers.size());
+            System.enqueueJob(new IdTheftInvestiagationCasesShawQueueable(listofActivityNoteWrappers, ActivityWrap_Case_Map));
+        }
+
+    } 
+    
+    public static CollectionsOutData getActivityNoteWrapper(Long AccId, Integer caseNumber, String ChangeCodeID, String ChangeDataAlpha)
+    {
+        CollectionsOutData  values = new CollectionsOutData ();
+        values.ChangeCodeID  = ChangeCodeID;
+        values.ChangeDataAlpha = ChangeDataAlpha;
+        values.AccountID = AccId;
+        values.AppSourceIdName = 'CaseNumber';
+        values.AppSourceID = caseNumber;
+        values.AppSourceLabel = 'Salesforce';
+        return values;
+    }*/
+
+    public static String retrieveLatestInternalComments(Id caseId)
+    {
+        CaseComment caseCommentRecord = [select id,parentid,commentBody,createdDate from CaseComment where parentid=:caseId order by CreatedDate desc Limit 1];
+        return caseCommentRecord.commentBody;
+    }
+
+    @future (callout=true)
+    public static void retrieveLoanPayoutInfoOnResolution(Map<Id, String> exeterAccountIds)
+    {
+        List<Case> casesToUpdate = new List<Case>();
+        STS_Callout__mdt STS = STS_Callout__mdt.getInstance('STS_Callout');
+        String scope = 'openid profile SalesforceClient DealerRecoveryServiceAPI';
+        String accessToken = GetSTSToken.GetAccessToken(scope);
+        String Endpoint = STS.Dealer_Recovery_Service_Endpoint__c;
+        String accountIdentifier = GeneralSettingsService.getSettingAsString(Constants.ACCOUNT_INFO_BY_ACCOUNT_IDENTIFIER_SETTING_NAME);
+        String applicationIdentifier = GeneralSettingsService.getSettingAsString(Constants.ACCOUNT_INFO_BY_APPLICATION_IDENTIFIER_SETTING_NAME);
+        
+        List<Application_Log__c> App_Log = new List<Application_Log__c>();
+        
+        if(exeterAccountIds != null && !exeterAccountIds.isEmpty()) {
+            for (Id cId : exeterAccountIds.keySet())
+            {
+                String accountId = exeterAccountIds.get(cId);
+                Case accountCase = new Case(Id = cId);
+                if(accessToken == null){
+                        Application_Log__c log = ApplicationLogger.Callout_App_Log('STS Callout Status','INFO', 'Failure', null, cId, 'CTHE', 'retrieveLoanPayoutInfoOnResolution', 'STSCallout');
+                        App_Log.add(log);
+                    }
+                try {
+                    HttpRequest req = new HttpRequest();
+                    req.setHeader('Authorization', 'Bearer ' + accessToken);
+                    req.setEndpoint(Endpoint + accountIdentifier + '/' + accountId);
+                    req.setHeader('Origin', GeneralSettingsService.getSettingAsString(Constants.DEALER_RECOVERY_SERVICE_CALLOUT_ORIGIN_SETTING_NAME));
+                    System.debug('Origin ' + req.getHeader('Origin'));
+                    req.setMethod('GET');
+                    Http http = new Http();
+                    HTTPResponse res = http.send(req);
+                    List<Integer> int_lst = new List<Integer>{200, 201};
+                        if(int_lst.contains(res.getStatusCode())){
+                            Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status','INFO', 'Success', string.valueof(res.getStatusCode()), cId, 'CTHE', 'retrieveLoanPayoutInfoOnResolution', 'IDTheftCases');
+                            App_Log.add(log);
+                        }
+                    
+                    else if(!int_lst.contains(res.getStatusCode())){
+                        Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status','INFO', 'Failure', string.valueof(res.getStatusCode()), cId, 'CTHE', 'retrieveLoanPayoutInfoOnResolution', 'IDTheftCases');
+                        App_Log.add(log);
+                    }
+                    System.debug('Response Body:' + res.getBody());
+                    //Parse the Json and update the Case record
+                    Map<String, Object> jsonBody = (Map<String, Object>) Json.deserializeUntyped(res.getBody());
+                    accountCase.Loss_Payoff_Amount__c=Double.valueOf(jsonBody.get('TenDayPayoffAmount'));
+
+                    casesToUpdate.add(accountCase);
+                }
+                catch (exception e){
+                    System.debug('Exception:'+ e);
+                    accountCase.Fetch_in_Process__c = null;
+                    casesToUpdate.add(accountCase);
+                    //throw new ControllerException('Unexpected error occurred. Please try again later after sometime. Thank You!!');
+                }
+                
+            }
+            if(!App_Log.isEmpty()){
+                Insert App_Log;
+            }
+            update casesToUpdate;
+        }
+    }
+    @future (callout=true)
+    public static void fetchAccountInfo(Map<Id, String> exeterAccountIds, Map<Id, String> applicationIds) {
+        STS_Callout__mdt STS = STS_Callout__mdt.getInstance('STS_Callout');
+        List<Case> casesToUpdate = new List<Case>();
+        List<Application_Log__c> App_Log = new List<Application_Log__c>();
+        String accountIdentifier = GeneralSettingsService.getSettingAsString(Constants.ACCOUNT_INFO_BY_ACCOUNT_IDENTIFIER_SETTING_NAME);
+        String applicationIdentifier = GeneralSettingsService.getSettingAsString(Constants.ACCOUNT_INFO_BY_APPLICATION_IDENTIFIER_SETTING_NAME);
+        String generalSettings = GeneralSettingsService.getSettingAsString(Constants.DEALER_RECOVERY_SERVICE_CALLOUT_ORIGIN_SETTING_NAME);
+        String scope = 'openid profile SalesforceClient DealerRecoveryServiceAPI';
+        String accessToken = GetSTSToken.GetAccessToken(scope);
+        String Endpoint = STS.Dealer_Recovery_Service_Endpoint__c;
+        
+        if(exeterAccountIds != null && !exeterAccountIds.isEmpty()){
+
+            Map<Id, Case> latestCaseMap = New Map<Id, Case>([SELECT Id, RecordTypeId from Case where Id IN: exeterAccountIds.keySet()]);
+            
+            for(Id cId: exeterAccountIds.keySet()){ 
+                String accountId = exeterAccountIds.get(cId);
+                Case accountCase = new Case(Id = cId, RecordTypeId = latestCaseMap.get(cId).RecordTypeId);
+                if(accessToken == null){
+                        Application_Log__c log = ApplicationLogger.Callout_App_Log('STS Callout Status','INFO', 'Failure', null, cId, 'CTHE', 'fetchAccountInfo', 'STSCallout');
+                        App_Log.add(log);
+                    }
+                try{
+                    HttpRequest req = new HttpRequest();
+                    req.setHeader('Authorization', 'Bearer ' + accessToken);
+                    req.setEndpoint(Endpoint + accountIdentifier + '/' + accountId);
+                    System.debug('Endpoint ' + req.getEndpoint());
+                    req.setHeader('Origin',generalSettings);
+                    System.debug('Origin '+req.getHeader('Origin'));
+                    req.setMethod('GET');
+                    Http http = new Http();
+                    HTTPResponse res = http.send(req);
+                    
+                    List<Integer> int_lst = new List<Integer>{200, 201};
+                        if(int_lst.contains(res.getStatusCode())){
+                            Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status','INFO', 'Success', string.valueof(res.getStatusCode()), cId, 'CTHE', 'fetchAccountInfo', 'IDTheftCases');
+                            App_Log.add(log);
+                        }
+                    
+                    else if(!int_lst.contains(res.getStatusCode())){
+                        Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status','INFO', 'Failure', string.valueof(res.getStatusCode()), cId, 'CTHE', 'fetchAccountInfo', 'IDTheftCases');
+                        App_Log.add(log);
+                    }
+                    System.debug('Response Body:' + res.getBody());
+                    //Parse the Json and update the Case record
+                    Map<String, Object> jsonBody = (Map<String, Object>)Json.deserializeUntyped(res.getBody());
+                    System.debug('Parsed Json Body: ' +jsonBody);
+                    System.debug('Account Case Record Type Id = '+ accountCase.RecordTypeId);
+                    if(accountCase.RecordTypeId == DAcaseRecordTypeId){
+                        System.debug('within da record type for loop');
+                        accountCase.VIN__c = String.valueOf(jsonBody.get('VIN'));
+                        String YearOfVehicle = String.valueOf(jsonBody.get('VehicleModelYear'));
+                        String MakeOfVehicle = String.valueOf(jsonBody.get('VehicleMakeName'));
+                        String ModelOfVehicle = String.valueOf(jsonBody.get('VehicleModelName'));
+                        accountCase.Year_Make_Model_of_Vehicle__c = YearOfVehicle + ' ' + MakeOfVehicle + ' ' + ModelOfVehicle;
+                    }
+                    if(accountCase.RecordTypeId == IDTcaseRecordTypeId){
+                        accountCase.Application_ID__c = String.valueOf(jsonBody.get('ApplicationNumber'));
+                        accountCase.X17_digit_Account__c = String.valueOf(jsonBody.get('AccountID'));
+                        accountCase.Payments_Made__c = Integer.valueOf(jsonBody.get('NumberOfPaymentsMade'));
+                    }
+                    //accountCase.AccountId = String.valueOf(jsonBody.get('SourceDealerID'));
+                    accountCase.Borrower__c = String.valueOf(jsonBody.get('BorrowerName'));
+                    accountCase.Borrower_Address_Line_1__c = String.valueOf(jsonBody.get('BorrowerAddressLine1'));
+                    accountCase.Borrower_Address_Line_2__c = String.valueOf(jsonBody.get('BorrowerAddressLine2'));
+                    accountCase.Borrower_Address_City__c = String.valueOf(jsonBody.get('BorrowerCity'));
+                    accountCase.Borrower_Address_State__c = String.valueOf(jsonBody.get('BorrowerStateCode'));
+                    accountCase.Borrower_Address_Zipcode__c = String.valueOf(jsonBody.get('BorrowerZipCode'));
+                    accountCase.CoBorrower__c = String.valueOf(jsonBody.get('CoborrowerName'));
+                    accountCase.CoBorrower_Address_Line_1__c = String.valueOf(jsonBody.get('CoborrowerAddressLine1'));
+                    accountCase.CoBorrower_Address_Line_2__c = String.valueOf(jsonBody.get('CoborrowerAddressLine2'));
+                    accountCase.CoBorrower_Address_City__c = String.valueOf(jsonBody.get('CoborrowerCityName'));
+                    accountCase.CoBorrower_Address_State__c = String.valueOf(jsonBody.get('CoborrowerStateCode'));
+                    accountCase.CoBorrower_Address_Zipcode__c = String.valueOf(jsonBody.get('CoborrowerZipCode'));
+                    String responseDate = String.valueOf(jsonBody.get('ContractDate'));
+                    responseDate = responseDate.subString(0,10);
+                    List<String> splittedDate = responseDate.split('-');
+                    Date contractDate = date.newinstance(Integer.valueOf(splittedDate[0]), Integer.valueOf(splittedDate[1]), Integer.valueOf(splittedDate[2]));
+                    accountCase.Contract_Date__c = contractDate;
+                    accountCase.Validation_Counter__c = 'No';
+                    accountCase.Account_Info_Fetch_Successful__c= 'Yes';
+                    accountCase.Fetch_in_Process__c = 2;
+
+                    casesToUpdate.add(accountCase);
+
+                }catch (exception e){
+                    System.debug('Exception:'+ e);
+                    accountCase.Account_Info_Fetch_Successful__c= 'No';
+                    accountCase.Fetch_in_Process__c = null;
+                    casesToUpdate.add(accountCase);
+                    //throw new ControllerException('Unexpected error occurred. Please try again later after sometime. Thank You!!');
+                }
+            }
+        }
+
+        if(applicationIds != null && !applicationIds.isEmpty()){
+
+            for(Id cId: applicationIds.keySet()){
+                String applicationId = applicationIds.get(cId);
+                Case applicationCase = new Case(Id = cId);
+
+                try{
+                    HttpRequest req = new HttpRequest();
+                    req.setHeader('Authorization', 'Bearer ' + accessToken);
+                    req.setEndpoint(Endpoint + applicationIdentifier + '/' + applicationId);
+                    System.debug('Endpoint ' + req.getEndpoint());
+                    req.setHeader('Origin',generalSettings);
+                    System.debug('Origin '+req.getHeader('Origin'));
+                    req.setMethod('GET');
+                    Http http = new Http();
+                    HTTPResponse res = http.send(req);
+                    
+                    List<Integer> int_lst = new List<Integer>{200, 201};
+                        if(int_lst.contains(res.getStatusCode())){
+                            Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status','INFO', 'Success', string.valueof(res.getStatusCode()), cId, 'CTHE', 'fetchAccountInfo', 'IDTheftCases');
+                            App_Log.add(log);
+                        }
+                    
+                    else if(!int_lst.contains(res.getStatusCode())){
+                        Application_Log__c log = ApplicationLogger.Callout_App_Log('Callout Status','INFO', 'Failure', string.valueof(res.getStatusCode()), cId, 'CTHE', 'fetchAccountInfo', 'IDTheftCases');
+                        App_Log.add(log);
+                    }
+                    System.debug('Response Body:' + res.getBody());
+                    //Parse the Json and update the Case record
+                    Map<String, Object> jsonBody = (Map<String, Object>)Json.deserializeUntyped(res.getBody());
+                    System.debug('Parsed Json Body: ' +jsonBody);
+
+                    applicationCase.Exeter_Account_ID__c = String.valueOf(jsonBody.get('AccountNumber'));
+                    //applicationCase.AccountId = String.valueOf(jsonBody.get('SourceDealerID'));
+                    applicationCase.X17_digit_Account__c = String.valueOf(jsonBody.get('AccountID'));
+                    applicationCase.Borrower__c = String.valueOf(jsonBody.get('BorrowerName'));
+                    applicationCase.Borrower_Address_Line_1__c = String.valueOf(jsonBody.get('BorrowerAddressLine1'));
+                    applicationCase.Borrower_Address_Line_2__c = String.valueOf(jsonBody.get('BorrowerAddressLine2'));
+                    applicationCase.Borrower_Address_City__c = String.valueOf(jsonBody.get('BorrowerCity'));
+                    applicationCase.Borrower_Address_State__c = String.valueOf(jsonBody.get('BorrowerStateCode'));
+                    applicationCase.Borrower_Address_Zipcode__c = String.valueOf(jsonBody.get('BorrowerZipCode'));
+                    applicationCase.CoBorrower__c = String.valueOf(jsonBody.get('CoborrowerName'));
+                    applicationCase.CoBorrower_Address_Line_1__c = String.valueOf(jsonBody.get('CoborrowerAddressLine1'));
+                    applicationCase.CoBorrower_Address_Line_2__c = String.valueOf(jsonBody.get('CoborrowerAddressLine2'));
+                    applicationCase.CoBorrower_Address_City__c = String.valueOf(jsonBody.get('CoborrowerCityName'));
+                    applicationCase.CoBorrower_Address_State__c = String.valueOf(jsonBody.get('CoborrowerStateCode'));
+                    applicationCase.CoBorrower_Address_Zipcode__c = String.valueOf(jsonBody.get('CoborrowerZipCode'));
+                    String responseDate = String.valueOf(jsonBody.get('ContractDate'));
+                    responseDate = responseDate.subString(0,10);
+                    List<String> splittedDate = responseDate.split('-');
+                    Date contractDate = date.newinstance(Integer.valueOf(splittedDate[0]), Integer.valueOf(splittedDate[1]), Integer.valueOf(splittedDate[2]));
+                    applicationCase.Contract_Date__c = contractDate;
+                    applicationCase.Payments_Made__c = Integer.valueOf(jsonBody.get('NumberOfPaymentsMade'));
+                    applicationCase.Validation_Counter__c = 'No';
+                    applicationCase.Account_Info_Fetch_Successful__c= 'Yes';
+                    applicationCase.Fetch_in_Process__c = 2;
+
+                    casesToUpdate.add(applicationCase);
+                }catch (exception e){
+                    System.debug('Exception:'+ e);
+                    applicationCase.Account_Info_Fetch_Successful__c= 'No';
+                    applicationCase.Fetch_in_Process__c = null;
+                    casesToUpdate.add(applicationCase);
+                    //throw new ControllerException('Unexpected error occurred. Please try again later after sometime. Thank You!!');
+                }
+
+            }
+        }
+        if(!App_Log.isEmpty()){
+                Insert App_Log;
+            }
+        update casesToUpdate;
+    }
+
+    public static void resetAccCase(List<Case> resetList){
+        if(resetList != null && !resetList.isEmpty()){
+            for(Case c: resetList){
+                if(c.RecordTypeId == DAcaseRecordTypeId){
+                    c.VIN__c = null;
+                    c.Year_Make_Model_of_Vehicle__c = null;
+                }
+                if(c.RecordTypeId == IDTcaseRecordTypeId){
+                    c.Application_ID__c = null;
+                    c.X17_digit_Account__c = null;
+                    c.Claimant_s_Address_Line_1__c = null;
+                    c.Claimant_s_Address_Line_2__c = null;
+                    c.Claimant_s_Address_City__c = null;
+                    c.Claimant_s_Address_State__c = null;
+                    c.Claimant_s_Address_Zipcode__c = null;
+                    c.Claimant_s_Address_the_same__c = null;
+                    c.Loss_Payoff_Amount__c = null;
+                    c.Payments_Made__c = null;
+                    c.Who_is_Submitting_the_Claim__c = null;
+                }
+                c.Exeter_Account_ID__c = null;
+                c.AccountId = null;
+                c.Borrower__c = null;
+                c.Borrower_Address_Line_1__c = null;
+                c.Borrower_Address_Line_2__c = null;
+                c.Borrower_Address_City__c = null;
+                c.Borrower_Address_State__c = null;
+                c.Borrower_Address_Zipcode__c = null;
+                c.CoBorrower__c = null;
+                c.CoBorrower_Address_Line_1__c = null;
+                c.CoBorrower_Address_Line_2__c = null;
+                c.CoBorrower_Address_City__c = null;
+                c.CoBorrower_Address_City__c = null;
+                c.CoBorrower_Address_State__c = null;
+                c.CoBorrower_Address_Zipcode__c = null;
+                c.Contract_Date__c = null;
+                c.Validated_Account_Info__c = null;
+                c.Account_Info_Fetch_Successful__c = null;
+                c.Validation_Counter__c = null;
+                c.Fetch_in_Process__c = null;
+            }
+        }
+    }
+
+    @future (callout=true)
+    public static void queueCustomerLetter(Set<Id> letterCaseSetIds){
+
+        if(!letterCaseSetIds.isEmpty()){
+            CaseService.calloutToQueueCustomerLetter(letterCaseSetIds);
+        }
+        
+    }
+ /*
+    @EFSALES-4320 This method will reassign the current case to the analyst who worked on most recent Duplicate case.
+    @author Karthik
+    @date Mar 14, 2022 
+*/
+    Public static void reassignDuplicateCases(List<Case> Case_Lst){
+        List<Case> listDupCases = new List<Case>();
+        Case Cs;
+        
+        if(!Case_Lst.isEmpty()){
+            Map<Id, Case> Case_LstMap = new Map<Id, Case>(Case_Lst);//7++
+            Cs = [Select id, Exeter_Account_ID__c, Application_ID__c, Investigation_Type__c, Assigned_To__c
+                  from Case where ID IN: Case_LstMap.keyset() LIMIT 1];
+            
+            if(Cs.Investigation_Type__c == 'ID Theft' && (Cs.Exeter_Account_ID__c!= null || Cs.Application_ID__c != Null)){
+                listDupCases = [ SELECT Id, CaseNumber, Investigation_Type__c, Assigned_To__c, 
+                                Validated_Account_Info__c, Complaint_Received_Date__c
+                                from Case WHERE (Exeter_Account_ID__c =: Cs.Exeter_Account_ID__c OR Application_ID__c =: Cs.Application_ID__c)
+                                AND Investigation_Type__c = 'ID Theft' AND Id != :Cs.Id AND Assigned_To__c != null
+                                ORDER BY Complaint_Received_Date__c DESC NULLS LAST];
+            }
+            
+        }
+        if(!listDupCases.isEmpty()){
+            Case cas = new Case();
+            cas.Id = Cs.Id;
+            if(Cs.Assigned_To__c != listDupCases[0].Assigned_To__c){
+                cas.Assigned_To__c = listDupCases[0].Assigned_To__c;
+            }
+            Update cas;
+        }
+    }
+
+    private static Map<Id, CaseComment> buildMapCaseComment(Set<Id> caseIdSet){
+        Map<Id, CaseComment> CaseComment_Map = new Map<Id, CaseComment>();
+        
+        for(CaseComment cc : [SELECT Id, ParentId, CommentBody, CreatedBy.Name, CreatedDate FROM CaseComment WHERE ParentId IN :caseIdSet ORDER BY ParentId, CreatedDate DESC]){
+            if(!CaseComment_Map.containsKey(cc.ParentId)){ //iterate through values, on first encounter of parentid, add to map
+                CaseComment_Map.put(cc.ParentId, cc); //most recent case comment
+            }
+        }
+        return CaseComment_Map;
+    }
+
+   /*  public class ActivityNoteWrapper
+    {
+        public ActivityNote[] ActivityOuts { get; set; }
+        public CollectionsOutData[] CollectionOuts { get; set; }
+    }
+
+    public class ActivityNote {
+        public Long AccountID {get;set;}
+        public String ActivityCode  {get; set;}
+        public String Note  {get;set;}
+        public String AppSourceLabel {get;set;}
+        public String AppSourceIDName {get;set;}
+        public Integer AppSourceID {get;set;}
+        public Datetime AppSourceCreatedDate{get; set;}
+        public Integer SourceID{get;set;} 
+    }
+    
+    public class CollectionsOutData {
+        public String ChangeCodeID {get;set;}
+        public String ChangeDataAlpha  {get;set;} 
+        public Long AccountID {get;set;}
+        public String AppSourceLabel {get;set;}
+        public String AppSourceIDName {get;set;}
+        public Integer AppSourceID {get;set;}
+    }
+ */
+    //bulkapi POC
+    public class BulkAPIDataOutEntries
+    {
+        public DataOut[] Entries              { get; set; }
+    }
+
+    public class DataOut
+    {
+
+        public DataOut (Case idtCase, String fileType) {
+            this.DataOutID = 0;
+            this.AccountID = Long.valueOf(idtCase.X17_digit_Account__c);
+            this.SpectrumAccountNumber = null;
+            this.SourceID = Integer.valueOf(idtCase.CaseNumber);
+            this.SourceIDColumnName = SOURCE_ID_COLUMN_NAME;
+            this.SourceSystemName = SOURCE_SYSTEM_NAME;
+            this.ActivityCode = null;
+            this.ApiProcessName = null;
+            this.FileImportID = null;
+            this.BulkUploadFileType = fileType;
+            this.Created = DateTime.now();
+        }
+        
+        Integer  DataOutID             { get; set; }
+        Long     AccountID             { get; set; }
+        Long     SpectrumAccountNumber { get; set; }
+        Integer  SourceID              { get; set; }
+        String   SourceIDColumnName    { get; set; }
+        String   SourceSystemName      { get; set; }
+        String   ActivityCode          { get; set; }
+        String   ApiProcessName        { get; set; }
+        String   FileImportID          { get; set; }
+        String   BulkUploadFileType    { get; set; }
+        public String   DataBody              { get; set; }
+        Datetime Created               { get; set; }
+    }
+
+    class ActivityChange {
+        String ClearQueueGroup      {get;set;}
+        String Notes                {get;set;}
+    }
+
+    class NonMonetaryChange {
+        String ChangeCodeId {get;set;}
+        String ChangeData   {get;set;}
+    }
+
+
+    public Enum BulkType { Activity , NonMonetary }
+
+}
