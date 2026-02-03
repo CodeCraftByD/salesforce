@@ -391,4 +391,17 @@ public static Id savePDFToAttachment(String recordId) {
     }
   }
     
+    @AuraEnabled
+    public static String getDownloadUrl(Id contentDocumentId) {
+        // Fetch the latest version of the file
+        ContentVersion cv = [SELECT Id FROM ContentVersion 
+                            WHERE ContentDocumentId = :contentDocumentId 
+                            AND IsLatest = true LIMIT 1];
+        system.debug('ContentVersion :'+ cv);
+        // Generate the URL for downloading
+        String fullFileURL = URL.getOrgDomainUrl().toExternalForm();
+        system.debug('fullFileURL :'+ fullFileURL + '/sfc/servlet.shepherd/version/download/' + cv.Id);
+        return fullFileURL + '/sfc/servlet.shepherd/version/download/' + cv.Id;
+    }
+    
 }
