@@ -35,6 +35,7 @@
                 console.log('Content Document ID: ' + contentDocumentId);
                 
                 if (contentDocumentId) {
+                    this.downloadFile(contentDocumentId);
                     this.navigateToFile(contentDocumentId);
                     this.showSuccess('PDF generated successfully');
                 } else {
@@ -61,8 +62,8 @@
         var vfPageName;
         
         vfPageName = 'NGSalesPDF';
-        
-        return '/apex/' + vfPageName + '?recordId=' + recordId + '#view=FitH';
+         // use ?id= instead of ?recordId= new change
+        return '/apex/' + vfPageName + '?id=' + recordId + '#view=FitH';
     },
     
     navigateToFile: function(contentDocumentId) {
@@ -73,6 +74,27 @@
             "recordId": contentDocumentId
         });
         navEvt.fire();
+    },
+        
+    downloadFile: function(contentDocumentId) {
+        console.log('Download file Id: ' + contentDocumentId);
+        var action = component.get("c.getDownloadUrl");
+        action.setParams({
+            contentDocumentId: contentDocumentId
+        });
+        action.setCallback(this, function(response) {
+            var state = response.getState();
+             console.log('Download state: ' + state);
+            console.log('Download response: ' + response.getReturnValue());
+            if (state === "SUCCESS") {
+                var url = response.getReturnValue(); // URL to the file
+                var link = component.find("downloadLink").getElement();
+                link.href = url;
+                link.download = 'filename.pdf'; // Suggested file name
+                link.click(); // Triggers the download
+            }
+        });
+        $A.enqueueAction(action);
     },
     
     showSuccess: function(message) {
