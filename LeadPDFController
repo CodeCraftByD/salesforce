@@ -1,0 +1,394 @@
+public with sharing class LeadPDFController {
+
+    public Id leadId { get; set; }
+    public Lead__c lead { get; set; }
+    public List<Opportunity_Product__c> oppProducts { get; set; }
+    public Opportunity_Product__c firstOppProduct { get; set; }
+    public String exShowRoomPrice { get; set; }
+    public String insurance { get; set; }
+    public String roadTax { get; set; }
+    public String fastag { get; set; }
+    public String logisticChages { get; set; }
+    public String tcs { get; set; }
+    public String roadPrice { get; set; }
+
+    // Phone numbers
+    public String tlPhone { get; set; }
+    public String smPhone { get; set; }
+
+  /*  public Boolean getIsMobile() {
+        String ua = ApexPages.currentPage().getHeaders().get('User-Agent');
+        if (ua == null) return false;
+        ua = ua.toLowerCase();
+        return ua.contains('android') || ua.contains('iphone') || ua.contains('ipad') || ua.contains('mobile');
+    }
+
+    public PageReference openMobilePDF() {
+        if (leadId == null) return null;
+        PageReference p = Page.LeadPDF_Mobile;
+        p.getParameters().put('id', leadId);
+        p.setRedirect(true);
+        return p;
+    }
+
+    public PageReference openDesktopPDF() {
+        if (leadId == null) return null;
+        PageReference p = Page.NGSalesPDF;
+        p.getParameters().put('id', leadId);
+        p.setRedirect(true);
+        return p;
+    } */
+
+    public LeadPDFController() {
+        leadId = ApexPages.currentPage().getParameters().get('id');
+        if (leadId != null) {
+            // Fetch Lead safely
+            List<Lead__c> leadList = [
+                SELECT Id,
+                       Customer_Name__c, Name,
+                       Contact_Number__c,Agent_Id_Formula__c,
+                       CreatedBy.Branch__c,
+                       CreatedBy.MobilePhone,
+                       CreatedBy.Name,
+                       Account_Name__r.Id,
+                       Account_Name__r.OwnerId, 
+                       Account_Name__r.Name,
+                       Account_Name__r.BillingStreet,
+                       Account_Name__r.BillingCity,
+                       Account_Name__r.BillingState,
+                       Account_Name__r.BillingPostalCode,
+                       Account_Name__r.BillingCountry
+                FROM Lead__c
+                WHERE Id = :leadId
+                LIMIT 1
+            ];
+            if (!leadList.isEmpty()) {
+                lead = leadList[0];
+
+                // Fetch TL & SM Phone numbers safely
+                if (lead.Account_Name__r != null && lead.Account_Name__r.OwnerId != null) {
+                    List<User> tlList = [SELECT Id, MobilePhone, UserRoleId, IsActive FROM User WHERE Id = :lead.Account_Name__r.OwnerId LIMIT 1];
+                    if (!tlList.isEmpty()) {
+                        User tlUser = tlList[0];
+                        if (tlUser.IsActive) tlPhone = tlUser.MobilePhone;
+
+                        if (tlUser.UserRoleId != null) {
+                            List<UserRole> tlRoleList = [SELECT ParentRoleId FROM UserRole WHERE Id = :tlUser.UserRoleId LIMIT 1];
+                            if (!tlRoleList.isEmpty() && tlRoleList[0].ParentRoleId != null) {
+                                List<User> smList = [SELECT MobilePhone FROM User WHERE UserRoleId = :tlRoleList[0].ParentRoleId AND IsActive = true LIMIT 1];
+                                if (!smList.isEmpty()) smPhone = smList[0].MobilePhone;
+                            }
+                        }
+                    }
+                }
+
+                // Fetch Opportunity Products
+                oppProducts = [
+                    SELECT Id,
+                           Lead__c,
+                           Product__c,
+                           Product__r.Name,
+                           Nil_Dep_IMT_23__c,
+                           Fastag_Radium__c,
+                           CreatedDate,
+                           Ex_Showroom_Price__c,
+                           Net_on_road_Price__c,
+                           RTO_Charges_inclu_ding_Permit_in_BD__c,
+                           Steering__c,
+                           Enter_Discount__c,
+                           Incidental_charges_Logistics_charge__c,
+                           TCS_1__c,
+                           On_Road_Price__c
+                    FROM Opportunity_Product__c
+                    WHERE Lead__c = :leadId
+                    ORDER BY CreatedDate ASC
+                ];
+
+                if (!oppProducts.isEmpty()) {
+                    firstOppProduct = oppProducts[0];
+                    exShowRoomPrice = NumberFormatter.formatToIndianStyle(firstOppProduct.Ex_Showroom_Price__c);
+                    insurance = NumberFormatter.formatToIndianStyle(firstOppProduct.Nil_Dep_IMT_23__c);
+                    roadTax = NumberFormatter.formatToIndianStyle(firstOppProduct.RTO_Charges_inclu_ding_Permit_in_BD__c);
+                    fastag = NumberFormatter.formatToIndianStyle(firstOppProduct.Fastag_Radium__c);
+                    logisticChages = NumberFormatter.formatToIndianStyle(firstOppProduct.Incidental_charges_Logistics_charge__c);
+                    tcs = NumberFormatter.formatToIndianStyle(firstOppProduct.TCS_1__c);
+                    roadPrice = NumberFormatter.formatToIndianStyle(firstOppProduct.On_Road_Price__c);
+                }
+            }
+        }
+    }
+
+    @AuraEnabled(cacheable=false)
+  public static String getQuotePDFFormat(Id recordId) {
+    try {
+      Lead__c quote = [SELECT Id,Name FROM Lead__c WHERE Id = :recordId LIMIT 1];
+      return quote.Name;
+    } catch (Exception e) {
+      throw new AuraHandledException('Failed to retrieve PDF format. Error: ' + e.getMessage());
+    }
+  }
+
+   @AuraEnabled(cacheable=false)
+public static Id savePDFToAttachment(String recordId) {
+
+    if (recordId == null) {
+        System.debug('recordId is null! Cannot generate PDF.');
+        return null;
+    }
+
+    List<Lead__c> leadList = [
+        SELECT Id, Name, Customer_Name__c, Agent_Id_Formula__c
+        FROM Lead__c
+        WHERE Id = :recordId
+        LIMIT 1
+    ];
+
+    if (leadList.isEmpty()) {
+        System.debug('Lead not found for Id: ' + recordId);
+        return null;
+    }
+
+    Lead__c leadRec = leadList[0];
+
+    try {
+        String PDFFileExtName = '.pdf';
+
+        ContentVersion cVersion = new ContentVersion();
+        cVersion.ContentLocation = 'S';
+        cVersion.Origin = 'C';
+        cVersion.PathOnClient = 'LeadPDF' + PDFFileExtName;
+
+        PageReference pdf = new PageReference('/apex/NGSalesPDF');
+        pdf.getParameters().put('id', String.valueOf(leadRec.Id));
+        pdf.setRedirect(true);
+
+        Blob pdfPageBlob = Test.isRunningTest()
+            ? Blob.valueOf('Unit.Test')
+            : pdf.getContentAsPDF();
+
+        cVersion.VersionData = pdfPageBlob;
+
+        // Version number
+        List<AggregateResult> aggr = [
+            SELECT COUNT(Id) recordCount
+            FROM ContentDocumentLink
+            WHERE LinkedEntityId = :leadRec.Id
+        ];
+
+        Integer versionNo = 1;
+        if (!aggr.isEmpty()) {
+            versionNo = Integer.valueOf(aggr[0].get('recordCount')) + 1;
+        }
+
+        cVersion.Title = leadRec.Name + '_V' + versionNo;
+        insert cVersion;
+
+        // Fetch ContentDocumentId
+        ContentVersion cv = [
+            SELECT ContentDocumentId
+            FROM ContentVersion
+            WHERE Id = :cVersion.Id
+            LIMIT 1
+        ];
+
+        Id conDocument = cv.ContentDocumentId;
+
+        // Link file to Lead
+        ContentDocumentLink cDocLink = new ContentDocumentLink();
+        cDocLink.ContentDocumentId = conDocument;
+        cDocLink.LinkedEntityId = leadRec.Id;
+        cDocLink.ShareType = 'V';
+        cDocLink.Visibility = 'AllUsers';
+        insert cDocLink;
+
+        // RETURN ContentDocumentId
+        return conDocument;
+
+    } catch (Exception e) {
+        System.debug('Exception Message: ' + e.getMessage());
+        return null;
+    }
+}
+/**
+   * @description Generates and saves a PDF, with options for versioning.
+   * @param recordId The ID of the record to attach the PDF to.
+   * @param vfPageUrl The URL the Visualforce page along with parameters (e.g., 'QuotationPDF?recordId=').
+   * @param fileNameScheme The base name structure (e.g., 'Quote-{Quote_Number__c}'). Do NOT include .pdf.
+   * @param isVersioningEnabled If true, creates new versions of an existing file.
+   * If false, creates a new, separate file every time (e.g., 'Quote-Q100-20250101_143000.pdf').
+   * @return Id The ID of the generated ContentDocument record (for navigation).
+   */
+  @AuraEnabled
+  public static Id generateAndSavePDF(
+    Id recordId,
+    String vfPageUrl,
+    String fileNameScheme,
+    Boolean isVersioningEnabled
+  ) {
+    // 1. Fetch data for dynamic file naming
+    Set<String> fieldApiNames = extractFieldNames(fileNameScheme);
+    SObject record = getRecordData(recordId, fieldApiNames);
+    String baseFileTitle = generateFileTitle(fileNameScheme, record);
+
+    // 2. Generate the PDF content
+    PageReference pdfPage = new PageReference(vfPageUrl);
+    pdfPage.getParameters().put('recordId', recordId);
+    Blob pdfBlob;
+    try {
+      pdfBlob = pdfPage.getContentAsPDF();
+    } catch (Exception e) {
+      throw new AuraHandledException(
+        'Failed to generate PDF. Error: ' + e.getMessage()
+      );
+    }
+
+    // 3. Create the ContentVersion
+    ContentVersion cv = new ContentVersion();
+    cv.VersionData = pdfBlob;
+    cv.IsMajorVersion = true;
+
+    Id contentDocumentId;
+
+    if (isVersioningEnabled) {
+      // --- TRUE VERSIONING ---
+      // Find an existing file's ID with the *exact* base title linked to this record
+      Id existingDocId = getExistingContentDocumentId(recordId, baseFileTitle);
+
+      cv.Title = baseFileTitle; // e.g., "Quote-Q100"
+      cv.PathOnClient = baseFileTitle + '.pdf';
+
+      if (existingDocId != null) {
+        // This is a NEW VERSION of an existing file
+        cv.ContentDocumentId = existingDocId;
+        insert cv;
+        contentDocumentId = existingDocId;
+      } else {
+        // This is the FIRST VERSION of this file
+        insert cv;
+        contentDocumentId = linkNewDocument(cv.Id, recordId);
+      }
+    } else {
+      // --- VERSIONING DISABLED ---
+      // Always create a new, unique file with a timestamp
+      String timestamp = Datetime.now().format('yyyyMMdd_HHmmss');
+      String uniqueTitle = baseFileTitle + '-' + timestamp; // e.g., "Quote-Q100-20250101_143000"
+
+      cv.Title = uniqueTitle;
+      cv.PathOnClient = uniqueTitle + '.pdf'; 
+
+      insert cv;
+      contentDocumentId = linkNewDocument(cv.Id, recordId);
+    }
+
+    return contentDocumentId;
+  }
+
+
+
+  // --- Helper Methods ---
+
+  /**
+   * @description Finds the ID of an existing ContentDocument linked to the record with an exact title match.
+   * @return Id The ID of the ContentDocument, or null if not found.
+   */
+  private static Id getExistingContentDocumentId(Id recId, String fileTitle) {
+    // Query ContentDocumentLink directly and filter on the related ContentDocument's Title.
+    List<ContentDocumentLink> cdls = [
+      SELECT ContentDocumentId
+      FROM ContentDocumentLink
+      WHERE LinkedEntityId = :recId AND ContentDocument.Title = :fileTitle
+      ORDER BY ContentDocument.CreatedDate DESC
+      LIMIT 1
+    ];
+
+    return cdls.isEmpty() ? null : cdls[0].ContentDocumentId;
+  }
+
+  /**
+   * @description Links a newly created ContentDocument (via its ContentVersion) to a record.
+   * @return Id The ContentDocument ID.
+   */
+  private static Id linkNewDocument(Id contentVersionId, Id recordId) {
+    Id contentDocId = [
+      SELECT ContentDocumentId
+      FROM ContentVersion
+      WHERE Id = :contentVersionId
+      LIMIT 1
+    ].ContentDocumentId;
+    
+    ContentDocumentLink cdl = new ContentDocumentLink();
+    cdl.ContentDocumentId = contentDocId;
+    cdl.LinkedEntityId = recordId;
+    cdl.ShareType = 'V'; // 'V' = Viewer access
+    cdl.Visibility = 'AllUsers'; // Visible to all users with record access
+    insert cdl;
+    
+    return contentDocId;
+  }
+
+  /**
+   * @description Generates the file title from the scheme and record data.
+   */
+  private static String generateFileTitle(String scheme, SObject record) {
+    if (record == null)
+      return scheme;
+
+    String finalName = scheme;
+    Pattern p = Pattern.compile('\\{([^}]+)\\}');
+    Matcher m = p.matcher(scheme);
+
+    while (m.find()) {
+      String fieldName = m.group(1);
+      Object fieldValue = record.get(fieldName);
+      String replacement = (fieldValue != null)
+        ? String.valueOf(fieldValue)
+        : '';
+      // Clean up replacement value for use in a file name
+      replacement = replacement.replaceAll('[^a-zA-Z0-9\\-_\\.]', '_');
+      replacement = Matcher.quoteReplacement(replacement);
+      finalName = finalName.replaceAll(Pattern.quote(m.group(0)), replacement);
+    }
+    return finalName;
+  }
+
+  /**
+   * @description Extracts all {fieldNames} from the scheme.
+   */
+  private static Set<String> extractFieldNames(String scheme) {
+    Set<String> fields = new Set<String>();
+    Pattern p = Pattern.compile('\\{([^}]+)\\}');
+    Matcher m = p.matcher(scheme);
+    while (m.find()) {
+      fields.add(m.group(1));
+    }
+    return fields;
+  }
+
+  /**
+   * @description Queries the record for the dynamic fields.
+   */
+  private static SObject getRecordData(Id recId, Set<String> fields) {
+    if (fields.isEmpty())
+      return null;
+
+    String sObjectName = recId.getSObjectType().getDescribe().getName();
+    String fieldList = String.join(new List<String>(fields), ', ');
+    String query =
+      'SELECT ' +
+      fieldList +
+      ' FROM ' +
+      sObjectName +
+      ' WHERE Id = :recId LIMIT 1';
+
+    try {
+      return Database.query(query);
+    } catch (Exception e) {
+      // Throw the exception to notify the caller (LWC, Flow, etc.) that the operation failed.
+      throw new AuraHandledException(
+        'Failed to query record data for file name. Check field names in scheme. Error: ' +
+        e.getMessage()
+      );
+    }
+  }
+    
+}
