@@ -1,0 +1,266 @@
+<apex:page Controller="LeadPDFController"
+           renderAs="pdf"
+           applyHtmlTag="false"
+           showHeader="false"
+           applyBodyTag="false"
+           contentType="application/pdf#Lead.pdf"
+           >
+    <html>
+        <head>
+            <style type="text/css">
+                @page {
+                size: A4 portrait;
+                margin-bottom: 1.42cm;
+                margin-top: 0.8cm;
+                margin-left: 0.53cm;
+                margin-right: 0.53cm;
+                
+                @top-center {
+                content: element(header);
+                }
+                @bottom-left{
+                content: element(footer);
+                }
+                counter-increment: page;
+                }
+                
+                
+                tr {
+                    page-break-inside: avoid;
+                }
+                
+            </style>
+        </head>
+        <body>
+            <div class="content" style="font-family: sans-serif; font-size: 12px; color: #222;">
+                <!-- Header -->
+                <table width="100%" cellspacing="0" cellpadding="0">
+                    <tr>
+                        <td width="60%" style="font-size: 15px;text-align: left; border: none; padding-bottom: 8px;">
+                            <div style="font-size: 30px; font-weight: bold; color: #0e86ad;">N.G. SALES</div>
+                            <div style="font-size:  13px; line-height: 1.4; margin-bottom: 2px;"><strong>Main office :</strong> Sr No. 129/113, New Pune - Mumbai Highway,<br/>
+                                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Tathawade, Tal. - Mulshi, Dist. - Pune - 411 033.</div>
+                            <div style="font-size:  13px; line-height: 1.4; margin-bottom: 2px;"><strong>Branch :</strong> {!lead.CreatedBy.Branch__c}</div>
+                            <div style="font-size:13px; line-height:1.4; margin-bottom:2px;">
+    <strong>Mob No:</strong>
+    <apex:outputText rendered="{!NOT(ISBLANK(smPhone))}">
+        {!smPhone}
+    </apex:outputText>
+    <apex:outputText rendered="{!AND(NOT(ISBLANK(smPhone)), NOT(ISBLANK(tlPhone)))}">
+        /
+    </apex:outputText>
+    <apex:outputText rendered="{!NOT(ISBLANK(tlPhone))}">
+        {!tlPhone}
+    </apex:outputText>
+</div>
+
+                        </td>
+                        <td width="40%" style="border: none; text-align: right;padding-bottom: 15px;">
+                            <apex:image url="{! $Resource.NGSalesLogo}" width="170px" height="90px"/>
+                        </td>
+                    </tr>
+                </table>
+                
+                <!-- Title -->
+                <div style="background-color: #000;font-size:  15px; color: #fff; text-align: center; padding: 8px; font-weight: bold; margin:5px 0;">
+                    Quotation Cum Proforma Invoice
+                </div>
+                
+                <!-- Customer Info -->
+                <table style="width: 100%; border-collapse: collapse; margin-bottom: 5px;">
+                    <tr>
+                        <td style="border: 1px solid #000; border-bottom: none; padding: 10px; text-align: left; font-size: 11px; width: 60%;"><strong>Customer Name :</strong> {!lead.Account_Name__r.Name}</td>
+                        <td style="border: 1px solid #000; border-bottom: none; padding: 10px; text-align: left; font-size: 11px; width: 40%; font-weight: bold;">QUOTATION NO :{!lead.Name}</td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #000; border-top: none;
+                                   padding: 10px 10px 20px 10px;
+                                   text-align: left; font-size: 11px; width:60%;">
+                            
+                            <strong>Address :</strong>
+                            {!lead.Account_Name__r.BillingStreet}&nbsp;,
+                            {!lead.Account_Name__r.BillingCity}&nbsp;,
+                            {!lead.Account_Name__r.BillingState},
+                            {!lead.Account_Name__r.BillingPostalCode}&nbsp;,
+                            {!lead.Account_Name__r.BillingCountry}
+                            
+                        </td>
+                        <td style="border: 1px solid #000; border-top: none;padding: 10px; text-align: left; font-size: 11px; font-weight: bold; width: 40%;">DATE : <apex:outputText value="{0,date,dd-MM-yyyy}">
+    <apex:param value="{!firstOppProduct.CreatedDate}" />
+</apex:outputText></td>
+                    </tr>
+                </table>
+                
+                <!-- Particulars Table -->
+                <table style="width: 100%; border-collapse: collapse;">
+                    
+                    <!-- Header -->
+                    <tr>
+                        <th style="border: 1px solid #000; padding:10px; text-align:left; font-size:11px; font-weight:bold; width:70%">
+                            Particulars
+                        </th>
+                        <th style="border: 1px solid #000; padding:10px; text-align:center; font-size:11px; font-weight:bold; width:0%;">
+                            Amount
+                        </th>
+                    </tr>
+                    
+                    <!-- Products -->
+                    <apex:repeat value="{!oppProducts}" var="op">
+                        
+                        <!-- Model -->
+                        <tr>
+                            <td style="border: 1px solid #000; padding:10px 10px 40px 10px; text-align:left; font-size:12px;">
+                                Model Description : {!op.Product__r.Name}
+                            </td>
+                            <td style="border: 1px solid #000; padding:10px 10px 40px 10px; text-align:center; font-size:11px;">
+                                1
+                            </td>
+                        </tr>
+                        
+                        <!-- Ex Showroom Price -->
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 11px;">
+                                Ex Showroom Price (Including GST)
+                            </td>
+                            <td style="border: 1px solid #000; padding: 5px 10px 8px 10px; text-align: center; font-size: 11px;">
+                                INR {!exShowRoomPrice}
+                            </td>
+                        </tr>
+                        
+                        <!-- Insurance -->
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 11px;">
+                                Insurance
+                            </td>
+                            <td style="border: 1px solid #000; padding: 5px 10px 8px 10px; text-align: center; font-size: 11px;">
+                                INR {!insurance}
+                            </td>
+                        </tr> 
+                    
+                        
+                        <!-- Road Tax -->
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 11px;">
+                                Road Tax And Registration Charges
+                            </td>
+                            <td style="border: 1px solid #000; padding: 5px 10px 8px 10px; text-align: center; font-size: 11px;">
+                               INR {!roadTax}
+                            </td>
+                        </tr>
+                        
+                        <!-- Fastag -->
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 11px;">
+                                Fastag And Radium
+                            </td>
+                            <td style="border: 1px solid #000; padding: 5px 10px 8px 10px; text-align: center; font-size: 11px;">
+                                INR {!fastag}
+                            </td>
+                        </tr>
+                        
+                        <!-- Logistics -->
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 11px;">
+                                Logistics Charges
+                            </td>
+                            <td style="border: 1px solid #000; padding: 5px 10px 8px 10px; text-align: center; font-size: 11px;">
+                                INR {!logisticChages}
+                            </td>
+                        </tr>
+                        
+                        <!-- TCS 1% -->
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 11px;">
+                                TCS 1%
+                            </td>
+                            <td style="border: 1px solid #000; padding: 5px 10px 8px 10px; text-align: center; font-size: 11px;">
+                               INR {!tcs}
+                            </td>
+                        </tr>
+                        
+                        <!-- Total On Road Price -->
+                        <tr>
+                            <td style="border: 1px solid #000; padding: 5px; text-align: center; font-size: 11px; font-weight: bold;">
+                                Total On Road Price
+                            </td>
+                            <td style="border: 1px solid #000; padding: 5px 10px 8px 10px; text-align: center; font-size: 11px;">
+                               INR {!roadPrice}
+                            </td>
+                        </tr>
+                        
+                    </apex:repeat>
+                    
+                </table>
+                
+                
+                <!-- Payment Terms -->
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 10px 10px 3px 5px; text-align: left; font-size: 11px; width: 70%; vertical-align: top;">
+                            Cheque/DD Payable in favour of N. G.  SALES Payable at RD<br/><br/>
+                            Cash Payment accepted only at showroom Cashier and official receipt to be taken.
+                        </td>
+                        <td rowspan="3" style="border: 1px solid #000; padding: 10px; text-align: left; font-size: 11px; width: 0%; vertical-align:  top; font-weight: bold;">
+                            For Dealer<br/><br/><br/><br/><br/>
+                            Authorised Signature<br/><br/>
+                            Name : {!lead.CreatedBy.Name}<br/><br/>
+                            Mobile No:{!lead.CreatedBy.MobilePhone}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 0px 10px 10px 5px; text-align: left;line-height: 1.6; font-size: 11px; width: 70%; vertical-align: top;">
+                            <strong>RTGS / NEFT DETAILS</strong><br/>
+                            Banker's Name : State Bank Of India<br/>
+                            Bank Address : Kalewadi Branch<br/>
+                            Bank A/c No.  38018189858<br/>
+                            RTGS/NEFT IFSC CODE : SBIN0004523
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 5px; text-align: left; font-size: 11px; width: 70%; vertical-align: top;">
+                            <strong>GST NO :   27AAGFN3284R1ZJ / PAN Number :   AAGFN3284R</strong>
+                        </td>
+                    </tr>
+                </table>
+                
+                <!-- Terms and Conditions -->
+                
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="font-size: 10px;border: 1px solid #000; padding: 10px; line-height: 1.6;">
+                            <div style="font-weight: bold; margin-bottom: 8px;text-decoration: underline;">Terms And Conditions :</div>
+                            <div style="margin:  0; padding-left: 0; font-size: 10px; line-height: 1.6;">
+                                <div style="margin-bottom: 4px;">1) &nbsp;  Above prices are current Ex-Showroom prices. </div>
+                                <div style="margin-bottom: 4px;">2) &nbsp;  Prices and statutory levies are subject to change without any prior notice and those prevailing at the time of delivery.</div>
+                                <div style="margin-bottom: 4px;">3) &nbsp;  Delivery period will be reckoned from the date of receipt of payment.</div>
+                                <div style="margin-bottom: 4px;">4) &nbsp;  All variant features are subject to change. </div>
+                                <div style="margin-bottom: 4px;">5) &nbsp;  Acceptance of advance / deposit by seller is merely an indication of an intention to sell and does not ride into a contract of sale.</div>
+                                <div style="margin-bottom: 4px;">6) &nbsp;  All disputes arising between the parties hereto shall be subject only to the jurisdiction of the courts in Pune.</div>
+                                <div style="margin-bottom: 4px;">7) &nbsp;  Only the courts of ............... shall have jurlsdiction In any proceedings relating to the contract. </div>
+                                <div style="margin-bottom: 4px;">8) &nbsp;  This is to inform all our customers banks the law advance payment for purchase of vehicles made by them to us are not responsible in any manner. </div>
+                                <div style="margin-bottom: 4px;">9) &nbsp;  Liability for the refund of advance or delivery/payment vehicles share of by they deal with us on a pro-friendly to principally basis.</div>
+                            </div>
+                        </td>
+                    </tr>  
+                </table>
+                
+                <!--<div style="font-size: 10px; border: 1px solid #000; padding: 10px; line-height: 1.6;">
+                    <div style="font-weight: bold; margin-bottom: 8px;text-decoration: underline;">Terms And Conditions :</div>
+                    <div style="margin:  0; padding-left: 0; font-size: 10px; line-height: 1.6;">
+                        <div style="margin-bottom: 4px;">1) &nbsp;  Above prices are current Ex-Showroom prices. </div>
+                        <div style="margin-bottom: 4px;">2) &nbsp;  Prices and statutory levies are subject to change without any prior notice and those prevailing at the time of delivery.</div>
+                        <div style="margin-bottom: 4px;">3) &nbsp;  Delivery period will be reckoned from the date of receipt of payment.</div>
+                        <div style="margin-bottom: 4px;">4) &nbsp;  All variant features are subject to change. </div>
+                        <div style="margin-bottom: 4px;">5) &nbsp;  Acceptance of advance / deposit by seller is merely an indication of an intention to sell and does not ride into a contract of sale.</div>
+                        <div style="margin-bottom: 4px;">6) &nbsp;  All disputes arising between the parties hereto shall be subject only to the jurisdiction of the courts in Pune.</div>
+                        <div style="margin-bottom: 4px;">7) &nbsp;  Only the courts of ............... shall have jurlsdiction In any proceedings relating to the contract. </div>
+                        <div style="margin-bottom: 4px;">8) &nbsp;  This is to inform all our customers banks the law advance payment for purchase of vehicles made by them to us are not responsible in any manner. </div>
+                        <div style="margin-bottom: 4px;">9) &nbsp;  Liability for the refund of advance or delivery/payment vehicles share of by they deal with us on a pro-friendly to principally basis.</div>
+                    </div>
+                </div>-->
+                
+            </div>
+        </body>
+    </html>
+</apex:page>
