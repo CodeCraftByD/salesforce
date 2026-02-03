@@ -1,0 +1,68 @@
+<aura:component 
+    controller="LeadPDFController"
+    implements="force:lightningQuickAction,force:hasRecordId"
+    access="global">
+
+
+    <aura:attribute name="recordId" type="String"/>
+
+    <!--
+    <aura:attribute name="vfPageURL" type="String"/>
+    <aura:attribute name="showIframe" type="Boolean" default="true"/>
+
+    <aura:handler name="init" value="{!this}" action="{!c.myAction}"/>
+
+    <aura:html tag="style">
+        .slds-modal__container {
+            width: 90% !important;
+            max-width: 90% !important;
+            border-radius: 20px !important;
+            overflow: hidden !important;
+        }
+        .slds-modal__content {
+            padding: 0 !important;
+            overflow: hidden !important;
+        }
+        iframe {
+            border-radius: 20px !important;
+        }
+    </aura:html>
+
+    PDF Preview (Desktop + iOS only) 
+    <aura:if isTrue="{!v.showIframe}">
+        <iframe src="{!v.vfPageURL}"
+                width="100%"
+                height="525px"
+                frameBorder="0"/>
+    </aura:if>
+
+    Footer 
+    <div class="slds-modal__footer slds-text-align_right">
+        <lightning:button label="Cancel" onclick="{!c.handleCancel}"/>
+        <lightning:button variant="brand"
+            label="Save PDF"
+            onclick="{!c.handleSavePDFClick}"/>
+    </div>
+
+    -->
+    <aura:handler name="init" value="{!this}" action="{!c.doInit}"/>
+
+
+
+    
+
+
+    
+
+
+       
+
+<!-- Show spinner while processing -->  
+    <div class="slds-align_absolute-center" style="height: 5rem;">
+        <lightning:spinner variant="brand" size="medium" />
+    </div>
+
+    
+    
+
+</aura:component>
