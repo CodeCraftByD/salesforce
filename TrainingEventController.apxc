@@ -1,0 +1,616 @@
+public without sharing class TrainingEventController {
+    @testVisible private static TWGSystemErrorDAO.ITWGSystemErrorDAO twgSystemErrorDAOInstance = new TWGSystemErrorDAO();
+    @testVisible private static TrainingEventDAO.ITrainingEventDAO trainingEventDAOInstance = new TrainingEventDAO();
+    @testVisible private static RecordTypeDAO.IRecordTypeDAO recordTypeDAOInstance = new RecordTypeDAO();
+    @testVisible private static ProcessInstanceWorkitemDAOWOSharing.IProcessInstanceWorkitemDAOWOSharing
+        processInstanceWorkitemDAOWithoutSharingInstance = new ProcessInstanceWorkitemDAOWOSharing();
+    @testVisible private static GroupMemberWithoutSharingDAO.IGroupMemberWithoutSharingDAO
+        groupMemberWithoutSharingDAOInstance = new GroupMemberWithoutSharingDAO();
+    @testVisible private static PermissionSetAssignmentDAO.IPermissionSetAssignmentDAO permissionSetAssignmentDAOInstance =
+        new PermissionSetAssignmentDAO();
+    @testVisible private static EnrollmentDAO.IEnrollmentDAO enrollmentDAOInstance = new EnrollmentDAO();
+    @testVisible private static UserDAO.IUserDAO userDAOInstance = new UserDAO();
+    @testVisible private static EventTrainerDAO.IEventTrainerDAO eventTrainerDAOInstance = new EventTrainerDAO();
+    @testVisible private static PaymentTransactionDAO.IPaymentTransactionDAO paymentTransactionDAOInstance =
+        new PaymentTransactionDAO();
+
+    @AuraEnabled
+    public static String field{get;set;}
+    @AuraEnabled
+    public static String userRoleName{get;set;}
+    @AuraEnabled
+    public static String parentId{get;set;}
+    @AuraEnabled
+    public static List<Id> userId{get;set;}
+    @AuraEnabled
+    public static String distributionListEmailAddress{get;set;}
+    @AuraEnabled
+    public static List<String> PermissionSetAssignmentIdsEmail{get;set;}
+    @AuraEnabled
+    public static Id accountId{get;set;}
+    @AuraEnabled
+    public static Id courseId{get;set;}
+    @AuraEnabled
+    public static String inboundEmail{get;set;}
+    @AuraEnabled
+    public static String eventName{get;set;}
+    @AuraEnabled
+    public static String pendingSatusEmailBody{get;set;}
+    @AuraEnabled
+    public static String subject{get;set;}
+    @AuraEnabled
+    public static String folderId{get;set;}
+    @testVisible
+    private static DocumentDAO.IDocumentDAO documentDAOInstance = new DocumentDAO();
+    @testVisible
+    private static BACSMessageEmailTemplateController instanceUrl = new BACSMessageEmailTemplateController();
+    @testVisible
+    private static Training_Event__c getEventByRecordById{get;set;}
+    @testVisible
+    private static List<Training_Event__c> getEventByRecordList{get;set;}
+    public static String headerUrl;
+    public static String footerUrl;
+    @testVisible private static Boolean enableDSCLM = DocuSignCLMEnv__c.getOrgDefaults().Enable_DS_CLM__c;
+
+    @InvocableMethod
+    public static void submitForUnlockApprovalForPendingStatus(List<Id> recordId){
+        try{
+            if(recordId.size() > 0 && String.isNotEmpty(parentId)){
+                getEventByRecordById = trainingEventDAOInstance.getTrainingEventById(parentId);
+                getEventByRecordList = new List<Training_Event__c>{getEventByRecordById};
+                String pendingStatusSubject = subject.stripHtmlTags();
+                String subjectappendBodyAfter = pendingSatusEmailBody.substringAfter(':');
+                String subjectappendBodyBefore = pendingSatusEmailBody.substringBefore(':');
+                String stringOrganizationId = UserInfo.getOrganizationId(); 
+                List<String> carbonCopySendingEmail = new List<String>{distributionListEmailAddress}; 
+                List<OrgWideEmailAddress> orgWideEmailId = OrgWideEmailAddressDAO.getOrgWideEmailAddressFromVTUSASettings();
+                List<String> approvalMailLink = new List<String>{
+                    inboundEmail, 
+                    getEventByRecordById.Event_Name__c
+                        .replaceAll(VTUSAConstants.SYMBOL_AMPERSAND, VTUSAConstants.ASCII_AMPERSAND)
+                        + VTUSAConstants.ASCII_BAR + VTUSAEmailService.encryptData(getEventByRecordById.Id),
+                    VTUSAConstants.TRAINIG_EVENT_APPROVAL_BODY, VTUSAConstants.TRAINIG_EVENT_APPROVAL_LINK
+                };
+                List<String> rejectMailLink = new List<String>{
+                    inboundEmail, 
+                    getEventByRecordById.Event_Name__c
+                        .replaceAll(VTUSAConstants.SYMBOL_AMPERSAND, VTUSAConstants.ASCII_AMPERSAND)
+                        + VTUSAConstants.ASCII_BAR + VTUSAEmailService.encryptData(getEventByRecordById.Id),
+                    VTUSAConstants.TRAINIG_EVENT_REJECT_BODY, VTUSAConstants.TRAINIG_EVENT_REJECT_LINK
+                };
+                List<Document> lstDocument = documentDAOInstance.getDocumentsByFolderIdOrderByDescription(folderId);
+                for(Document docObj:lstDocument)
+                {
+                    if(docObj.DeveloperName.equalsIgnoreCase(VTUSAConstants.DOCUMENT_EMAIL_HEADER)){
+                        headerUrl = instanceUrl.imageURL + VTUSAConstants.DOCUMENT_URL +
+                            lstDocument[0].Id + VTUSAConstants.ORG_ID + stringOrganizationId;
+                    }
+                    else if(docObj.DeveloperName.equalsIgnoreCase(VTUSAConstants.DOCUMENT_EMAIL_FOOTER)){
+                        footerUrl = instanceUrl.imageURL + VTUSAConstants.DOCUMENT_URL +
+                            lstDocument[1].Id + VTUSAConstants.ORG_ID + stringOrganizationId;
+                    }
+                }
+                List<String> headerFooterLink=new List<String>{headerUrl,FooterUrl};
+                String originalBody=String.format(VTUSAConstants.TRAINING_EVENT_EMAIL_HEADER,headerFooterLink) +
+                    subjectappendBodyBefore + String.format(VTUSAConstants.TRAINING_EVENT_APPROVAL_MAIL_LINK, approvalMailLink) +
+                    String.format(VTUSAConstants.TRAINING_EVENT_REJECTED_MAIL_LINK, rejectMailLink) + subjectappendBodyAfter +
+                    String.format(VTUSAConstants.TRAINING_EVENT_EMAIL_FOOTER,headerFooterLink);
+                Messaging.SingleEmailMessage message = new Messaging.SingleEmailMessage();
+                message.setOrgWideEmailAddressId(orgWideEmailId[0].Id);
+                message.setToAddresses(PermissionSetAssignmentIdsEmail);
+                message.setHtmlBody(originalBody);
+                message.setSubject(pendingStatusSubject);
+                message.setSaveAsActivity(false);
+                message.setCcAddresses(carbonCopySendingEmail);
+                Messaging.SingleEmailMessage[] messages = new List<Messaging.SingleEmailMessage> {message};
+                Messaging.sendEmail(messages);
+            }
+            else{
+                throw new AuraHandledException(System.Label.Text_You_Do_Not_Have_Permissions_To_Perform_This_Operation);
+            }
+        }
+        catch (Exception exceptionObj) {
+            TWGSystemErrors.insertTwgSystemError(TWGSystemErrors.Application.VTUSA, null, 'User', false, exceptionObj,
+                'TrainingEnrollmentController', 'submitForUnlockApprovalForPendingStatus');
+            throw new AuraHandledException(exceptionObj.getMessage());
+        }
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Id getRecordTypeId(String sObjectName, String recordTypeDeveloperName){
+        try{
+            if(String.isNotBlank(sObjectName) && String.isNotBlank(recordTypeDeveloperName)){
+                return recordTypeDAOInstance.getRecordTypeId(recordTypeDeveloperName, sObjectName);
+            }
+        }catch(Exception exceptionObj){
+            throw new AuraHandledException(exceptionObj.getMessage());
+        }
+        return null;
+    }
+    
+    @AuraEnabled(cacheable=true)
+    public static Training_Event__c getRecord(Id recordId){
+        try{
+            if(recordId != null){
+                return trainingEventDAOInstance.getTrainingEventById(recordId);
+            }
+        }catch(Exception exceptionObj){
+            throw new AuraHandledException(exceptionObj.getMessage());
+        }
+        return null;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean validateEventEditable(Id recordId, String status){
+        Boolean eventEditValid = false;
+        Set<Id> actorQueueIds = new Set<Id>();
+        List<GroupMember> groupMembers = new List<GroupMember>();
+        if(recordId != null){
+            List<ProcessInstanceWorkitem> workItems = 
+                processInstanceWorkitemDAOWithoutSharingInstance.getUnApprovedProcessInstanceWorkitemByTargetObjectId(
+                new List<String>{recordId});
+            if(!workItems.isEmpty()){
+                for(ProcessInstanceWorkitem workItem: workItems){
+                    actorQueueIds.add(workItem.ActorId);
+                }
+            } else {
+                eventEditValid = true;
+            }
+            if(!actorQueueIds.isEmpty()){
+                groupMembers = groupMemberWithoutSharingDAOInstance.getGroupMembersByGroupIds(actorQueueIds);
+            }
+            if(!groupMembers.isEmpty()){
+                for(GroupMember member: groupMembers){
+                    if(member.UserOrGroupId == UserInfo.getUserID()) {
+                        eventEditValid = true;
+                        break;
+                    }
+                }
+            }
+            if(status == VTUSAConstants.TRAINING_EVENT_PENDING_STATUS){
+                List<PermissionSetAssignment> permissionSetAssignmentList = 
+                    permissionSetAssignmentDAOInstance.getPermissionSetAssignemtByPermissionSetName((Id)UserInfo.getuserId(), 
+                    new Set<String>{PermissionSetConstants.TRAINING_EVENT_TRAINER_PERMISSIONS});
+                if(permissionSetAssignmentList.size() > 0){
+                    eventEditValid = true;
+                }
+            }
+        }
+        return eventEditValid;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean validateEventCreatable(){
+        Boolean isCreatable = false;
+        try {
+            List<PermissionSetAssignment> permissionSetAssignmentList = 
+                permissionSetAssignmentDAOInstance.getPermissionSetAssignemtByPermissionSetName((Id)UserInfo.getuserId(), 
+                new Set<String>{VTUSAConstants.TRAINING_VP_PERMISSION_SET});
+            isCreatable = permissionSetAssignmentList.isEmpty() ? true : false;
+        } catch (Exception e) {
+            throw new AuraHandledException(e.getMessage());
+        }
+        return isCreatable;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static List<String> getAvailableRecordTypeNamesForSObject(String objectAPIName) {
+        List<String> recordTypes = new List<String>();
+        if(String.isNotBlank(objectAPIName)) {
+            SObjectType objType = ((SObject) Type.forName(objectAPIName).newInstance()).getSObjectType();
+            List<RecordTypeInfo> infos = objType.getDescribe().getRecordTypeInfos();
+            if (infos.size() > 0) {
+                for (RecordTypeInfo info : infos) {
+                    if (info.isAvailable() && !info.isMaster()){
+                        recordTypes.add(info.getRecordTypeId());
+                    }
+                }
+            }
+        }
+        return recordTypes;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Map<String, List<sObject>> getTrainingEventsAndRelatedRecords() {
+        Map<String, List<sObject>> sObjectsMap = new Map<String, List<sObject>>();
+        Set<String> paymentTypes = new Set<String>{VTUSAConstants.PAYMENT_TYPE_CREDIT_CARD, VTUSAConstants.PAYMENT_TYPE_CHECK};
+        Id contactId = userDAOInstance.getContactIdByUserId().ContactId;
+        Set<String> paymentStatus = new Set<String>{PaymentTransactionConstants.PAYMENT_TRANSACTION_STATUS_SUCCESS, PaymentTransactionConstants.PAYMENT_TRANSACTION_STATUS_FAILED};
+        Set<String> eventStatus = new Set<String>{VTUSAConstants.TRAINING_EVENT_PAID_STATUS, VTUSAConstants.TRAINING_EVENT_CANCELLED_STATUS, VTUSAConstants.VTUSA_EXPENSED};
+        Set<String> enrollmentStatus = new Set<String>{VTUSAConstants.ENROLLMENT_PAID_STATUS, VTUSAConstants.ENROLLMENT_CANCELLED_STATUS, VTUSAConstants.ENROLLMENT_ENROLLED_STATUS};
+
+        sObjectsMap.put(VTUSAConstants.TRAINING_EVENTS, trainingEventDAOInstance.getTrainingEventsByBillingContact(contactId, 
+            VTUSAConstants.TRAINING_EVENT_RECORD_TYPE_ID, VTUSAConstants.TRAINING_DEALERSHIP, paymentTypes, eventStatus,
+            PaymentTransactionConstants.PAYMENT_TRANSACTION_TRAINING_RECORD_TYPE_ID, paymentStatus));
+        sObjectsMap.put(VTUSAConstants.TRAINING_ENROLLMENTS, enrollmentDAOInstance.getEnrollmentRecordByBillingContact(contactId, 
+            VTUSAConstants.ENROLLMENT_RECORD_TYPE_ID, paymentTypes, enrollmentStatus,
+            PaymentTransactionConstants.PAYMENT_TRANSACTION_TRAINING_RECORD_TYPE_ID, paymentStatus));
+        return sObjectsMap;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static Boolean checkRequestSuppliesValidation(Training_Event__c eventRecord) {
+        Boolean isRequestSuppliesCreatable = false;
+        Set<String> permissionSetApiNamesToCheck = new Set<String>{VTUSAConstants.TRAINING_MANAGER_PERMISSION_SET, 
+            VTUSAConstants.TRAINING_TRAINER_PERMISSION_SET, VTUSAConstants.TRAINING_ADMIN_PERMISSION_SET};
+        List<PermissionSetAssignment> assignedPermissionSets = permissionSetAssignmentDAOInstance.getPermissionSetAssignemtByPermissionSetName(UserInfo.getUserID(), permissionSetApiNamesToCheck);
+        for (PermissionSetAssignment psa : assignedPermissionSets) {
+            if(eventRecord.Course_Type__c == VTUSAConstants.COURSE_TYPE_CLASSROOM 
+                || eventRecord.Course_Type__c == VTUSAConstants.COURSE_TYPE_VIRTUAL) {
+                isRequestSuppliesCreatable = psa.PermissionSet.Name == VTUSAConstants.TRAINING_ADMIN_PERMISSION_SET ? true : false;
+            } else {
+                isRequestSuppliesCreatable = (psa.PermissionSet.Name == VTUSAConstants.TRAINING_ADMIN_PERMISSION_SET 
+                    || psa.PermissionSet.Name == VTUSAConstants.TRAINING_MANAGER_PERMISSION_SET 
+                    || psa.PermissionSet.Name == VTUSAConstants.TRAINING_TRAINER_PERMISSION_SET) 
+                    ? true : false;
+            }
+        }
+        return isRequestSuppliesCreatable;
+    }
+
+    @AuraEnabled
+    public static void createSupplyOrderForm(Map<String, Object> supplyOrderDetails) {
+        String xml = '';
+        String eventId;
+        if(supplyOrderDetails != null) {
+            xml += '<Object>';
+            for(String supplyDetail: supplyOrderDetails.keySet()) {
+                if(supplyDetail == 'recordId') {
+                    eventId = (String) supplyOrderDetails.get(supplyDetail);
+                } else {
+                    xml += '<' + supplyDetail + '>' + (String) supplyOrderDetails.get(supplyDetail) + '</' + supplyDetail + '>';
+                } 
+            }
+
+            Training_Event__c trainingEvent = trainingEventDAOInstance.getTrainingEventsAndEventSupplies(eventId);
+            List<Event_Trainer__c> eventTrainers = eventTrainerDAOInstance.getEventTrainers(trainingEvent.Id);
+            List<String> trainerNames = new List<String>();
+            List<String>  carbonCopyAddress = new List<String>();
+            for(Event_Trainer__c eventTrainerObj : eventTrainers) {
+                trainerNames.add(eventTrainerObj.Trainer1__r.Name);
+                carbonCopyAddress.add(eventTrainerObj.Trainer1__r.Email);
+            }
+            String trainers = String.join(trainerNames, ',');
+
+            xml += '<SObjectId>' + trainingEvent.Id + '</SObjectId>';
+            xml += '<SObjectType>' + 'Training_Event__c' + '</SObjectType>';
+            xml += '<EventName>' + trainingEvent.Name + '</EventName>';
+            xml += '<TrainerName>' + trainers + '</TrainerName>';
+            xml += '<AccountName>' + trainingEvent.Account__r.Name + '</AccountName>';
+            xml += '<DateOfEvent>' + trainingEvent.Start_Date__c.formatGmt('yyyy-MM-dd') + '</DateOfEvent>';
+            
+            if(trainingEvent.Event_Supplies__r != null && !trainingEvent.Event_Supplies__r.isEmpty()) {
+                xml += '<Materials>';
+                for(Event_Supplies__c eventSupply: trainingEvent.Event_Supplies__r) {
+                    xml += '<Material>';
+                    xml += '<Id>' + eventSupply.Id + '</Id>';
+                    xml += '<Name>' + eventSupply.Supply_Name__r.Name + '</Name>';
+                    xml += '<Quantity>' + eventSupply.Quantity__c + '</Quantity>';
+                    xml += '</Material>';
+                }
+                xml += '</Materials>';
+            }                                    
+            xml += '</Object>';
+
+            try {
+                if(enableDSCLM) {
+                    DocuSignCLMUtility.startWorkflow(VTUSAConstants.TRAINING_REQUEST_SUPPLIES_WORKFLOW, xml);
+                } else {
+                    SpringCM201411 service = new SpringCM201411();
+                    service.StartWorkflow(VTUSAConstants.TRAINING_REQUEST_SUPPLIES_WORKFLOW, xml, null);
+                }
+            } catch(Exception ex) {
+                TWGSystemErrors.insertTwgSystemError(TWGSystemErrors.Application.VTUSA, null, 'Training_Event__c', false, 
+                    ex, 'TrainingEventController', 'createSupplyOrderForm');
+                throw new AuraHandledException(ex.getMessage());
+            }
+            sendSupplyRequestOrderEmail(trainingEvent, carbonCopyAddress, trainers);
+        }
+    }
+
+
+    public static void sendSupplyRequestOrderEmail(Training_Event__c eventRecord ,
+        List<String>  carbonCopyAddress, String trainerNames){
+
+        List<String> subjectParameters  = new List<String>{eventRecord.Account__r.Name, eventRecord.Event_Name__c };
+        String subject = String.format(
+            VTUSAConstants.EVENT_SUPPLIES_EMAIL_SUBJECT, subjectParameters);
+        List<String> emailBodyParameters  = new List<String>{eventRecord.Account__r.Name, 
+            String.valueOf(eventRecord.Start_Date__c.formatGmt('MM/dd/yyyy')),trainerNames};
+        String emailBody = String.format(
+            VTUSAConstants.EVENT_SUPPLIES_EMAIL_BODY, emailBodyParameters);
+        VTUSA_Settings__c vtusaSetting = VTUSA_Settings__c.getInstance();
+        String toAddress = vtusaSetting.Event_Supplies_Email__c;
+        List<String> toAddressList  =  new List<String>();
+
+        if(String.isNotBlank(toAddress)){
+            if (toAddress.contains(',')) {
+                toAddressList.addAll(toAddress.split(','));
+            } else {
+                 toAddressList.add(toAddress);
+            }
+        }
+        List<OrgWideEmailAddress> fromAddress 
+            = OrgWideEmailAddressDAO.getOrgWideEmailAddressFromVTUSASettings();
+        if(fromAddress!=null && fromAddress.size()>0 ){
+            carbonCopyAddress.add((String)fromAddress[0].Address); 
+        }
+
+        String templateURL =
+            String.format(VTUSAConstants.EVENT_SUPPLIES_DOCUMENT_URL,
+            new List<String>{eventRecord.Account__r.Name, eventRecord.Name });
+        String documentName = eventRecord.Account__r.Name + ' ' + VTUSAConstants.SUPPLIES_TEXT;
+        Blob fileContent = null;
+        String fileName = null;
+        if(fromAddress!=null && fromAddress.size()>0 ){
+            System.enqueueJob(new TrainingSendEmailWithAttachment(eventRecord, subject, emailBody,
+                toAddressList, carbonCopyAddress, (String)fromAddress[0].Id), 1);
+        }
+
+    }
+
+    public static void sendEmailWithAttachement(String subject, string body, List<String> toAddresses, List<String> ccAddresses,
+        String fromAddress,String fileName, Blob fileContent){
+        if(toAddresses != null){
+            Messaging.SingleEmailMessage eMail = new Messaging.SingleEmailMessage();
+            eMail.setCcAddresses(ccAddresses);
+            eMail.setSubject(subject);
+            eMail.setHtmlBody(body);
+            eMail.setToAddresses(toAddresses);
+
+            if(fromAddress !=null){
+                eMail.setOrgWideEmailAddressId(fromAddress);
+            }
+
+            List<Messaging.EmailFileAttachment> emailAttachmentList = new List<Messaging.EmailFileAttachment>();
+            if(!String.isEmpty(fileName) && fileContent != null){
+                Messaging.EmailFileAttachment emailAttachment = new Messaging.EmailFileAttachment();
+                emailAttachment.setFileName(fileName);
+                emailAttachment.setBody(fileContent);
+                emailAttachmentList.add(emailAttachment);
+                eMail.setFileAttachments(emailAttachmentList);
+            }
+            Messaging.sendEmail(new List<Messaging.SingleEmailMessage>{eMail});
+        }
+    }
+
+    @AuraEnabled
+    public static Boolean checkSupplyOrderFolderExists(Training_Event__c eventRecord) {
+        Map<String, Object> eventFolder;
+        String folderUrl = String.format(VTUSAConstants.EVENT_SUPPLIES_FOLDER_URL,  
+                new List<String>{ eventRecord.Name });
+        if(enableDSCLM) {
+            eventFolder = DocuSignCLMUtility.getFolderByPath(folderUrl);
+        } else {
+            String url = '/v201411/folders?path=' + folderUrl;
+            SpringCM201411 service = new SpringCM201411();
+            String sAccessToken = service.getSessionIdByApiUser();
+            HttpResponse res = SpringCMRest.Get(url, '', sAccessToken);
+            if(res.getStatusCode() != 404) {
+                eventFolder = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());
+            }
+        }
+
+        return (eventFolder == null);
+    }
+
+    @AuraEnabled
+    public static void cancelEnrollment(Id enrollmentId) {
+        try {
+            if (enrollmentId == null) {
+                throw new AuraHandledException('Invalid enrollment.');
+            }
+            Enrollment__c enrollmentRec =
+                enrollmentDAOInstance.getEnrollmentForCancellation(enrollmentId);
+                
+            if (enrollmentRec.Event_Id__r.Event_Start_Date__c <= System.now()) {
+                throw new AuraHandledException('Event already started. Cancellation is not allowed.');
+            }
+            if (enrollmentRec.Status__c == VTUSAConstants.ENROLLMENT_CANCELLED_STATUS) {
+                throw new AuraHandledException('Enrollment is already cancelled.');
+            }
+            Set<String> setOfTransactionStatus = new Set<String>{PaymentTransactionConstants.PAYMENT_TRANSACTION_STATUS_SUCCESS};
+            List<Payment_Transaction__c> listOfPaymentTransaction = new List<Payment_Transaction__c>();
+            listOfPaymentTransaction = paymentTransactionDAOInstance.getPaymentTransactionsByTransactionTypeAndStatus(enrollmentId, 
+                PaymentTransactionConstants.TRANSACTION_TYPE_TRAINING_FUND, setOfTransactionStatus);
+
+            if(listOfPaymentTransaction.size() > 0) {
+                Payment_Transaction__c refundPaymentTransactionInst = listOfPaymentTransaction[0].clone(false, true, false, false);
+                refundPaymentTransactionInst.Transaction_Type__c =PaymentTransactionConstants.TRANSACTION_TYPE_REFUND;
+                refundPaymentTransactionInst.Special_ID__c =  generatePaymentTransactionUniqueReference();
+                refundPaymentTransactionInst.RecordTypeId = PaymentTransactionConstants.PAYMENT_TRANSACTION_TRAINING_RECORD_TYPE_ID;
+
+                processEnrollmentRefund(refundPaymentTransactionInst, enrollmentRec);
+
+
+            }else{
+                enrollmentRec.Status__c = VTUSAConstants.ENROLLMENT_CANCELLED_STATUS;
+                enrollmentRec.Is_RD_Created__c = false;
+                update enrollmentRec;
+
+            }
+            
+
+        } catch (Exception ex) {
+            TWGSystemErrors.insertTwgSystemError(TWGSystemErrors.Application.VTUSA, enrollmentId, 'Enrollment__c',
+                false,ex,'TrainingEventController','cancelEnrollment');
+            throw new AuraHandledException(ex.getMessage());
+        }
+    }
+
+    private static String generatePaymentTransactionUniqueReference() {
+        String timestamp = Datetime.now().format('yyyyMMddHHmmss');
+        String randomNumber = String.valueOf(Math.abs(Crypto.getRandomLong())).substring(0, 10);
+        return 'PT' + timestamp + randomNumber;
+    }
+
+ 
+    public static void processEnrollmentRefund(
+        Payment_Transaction__c refundPaymentTransactionInst,Enrollment__c enrollmentRec) {
+
+        String MERCHANT_ID = VTUSA_Settings__c.getInstance().Training_Merchant_ID__c ;
+        String HOST = VTUSA_Settings__c.getInstance().Cybersource_Rest_API_Host__c;
+        String SHARED_SECRET = VTUSAEmailService.decryptData(
+            VTUSA_Settings__c.getInstance().Cybersource_Rest_API_SharedSecret__c);
+        String errorMessage = null;
+        
+        String transactionId = refundPaymentTransactionInst.Transaction_Id__c;
+        String resourcePath = '/pts/v2/payments/' + transactionId + '/refunds';
+        String url = 'https://' + HOST + resourcePath;
+        
+        Map<String, Object> amountDetailsMap = new Map<String, Object>{
+            'totalAmount' => refundPaymentTransactionInst.Amount__c,
+            'currency' => refundPaymentTransactionInst.CurrencyIsoCode
+        };
+
+        Map<String, Object> orderInformationMap = new Map<String, Object>{
+            'amountDetails' => amountDetailsMap
+        };
+
+        Map<String, Object> clientReferenceMap = new Map<String, Object>{
+            'code' => refundPaymentTransactionInst.Special_ID__c
+        };
+
+        Map<String, Object> bodyMap = new Map<String, Object>{
+            'clientReferenceInformation' => clientReferenceMap,
+            'orderInformation' => orderInformationMap
+        };
+        String requestBody = JSON.serialize(bodyMap);
+ 
+        String gmtDate = DateTime.now().formatGmt('EEE, dd MMM yyyy HH:mm:ss z');
+        Blob digestBlob = Crypto.generateDigest('SHA-256', Blob.valueOf(requestBody));
+        String digestHeader = 'SHA-256=' + EncodingUtil.base64Encode(digestBlob);
+ 
+        String signatureString = 'host: ' + HOST + '\n' +
+            'date: ' + gmtDate + '\n' +
+            'request-target: post ' + resourcePath + '\n' +
+            'digest: ' + digestHeader + '\n' +
+            'v-c-merchant-id: ' +  MERCHANT_ID;
+ 
+        Blob secretKey = EncodingUtil.base64Decode(SHARED_SECRET);
+        Blob signatureBlob = Crypto.generateMac('HmacSHA256', 
+            Blob.valueOf(signatureString), secretKey);
+        String signatureHash = EncodingUtil.base64Encode(signatureBlob);
+ 
+        String signatureHeader = 'keyid="' + VTUSAEmailService.decryptData(
+            VTUSA_Settings__c.getInstance().Cybersource_Rest_API_Key__c) 
+            + '", ' +
+            'algorithm="HmacSHA256", ' +
+            'headers="host date request-target digest v-c-merchant-id", ' +
+            'signature="' + signatureHash + '"';
+ 
+        HttpRequest requestData = new HttpRequest();
+        requestData.setEndpoint(url);
+        requestData.setMethod('POST');
+        requestData.setHeader('v-c-merchant-id',  MERCHANT_ID);
+        requestData.setHeader('Date', gmtDate);
+        requestData.setHeader('Host', HOST);
+        requestData.setHeader('Digest', digestHeader);
+        requestData.setHeader('Signature', signatureHeader);
+        requestData.setHeader('Content-Type', 'application/json');
+        requestData.setBody(requestBody);
+ 
+        Http http = new Http();
+        HttpResponse response = http.send(requestData);
+        RefundResponse refundResp ;
+        try {
+            refundResp = (RefundResponse) JSON.deserialize(response.getBody(),
+                RefundResponse.class);
+            if(response.getStatusCode() == 201){
+                String refundId = refundResp.id;
+                String status = refundResp.status;
+                Decimal refundAmount = refundResp.refundAmountDetails.refundAmount;
+                String responseCode = refundResp.processorInformation.responseCode;
+                String reconciliationId = refundResp.reconciliationId;
+                if(responseCode == '100') {
+                    refundPaymentTransactionInst.Status__c = 
+                        PaymentTransactionConstants.PAYMENT_TRANSACTION_STATUS_SUCCESS;
+                    refundPaymentTransactionInst.Transaction_Id__c = refundId;
+                } else {
+                    refundPaymentTransactionInst.Status__c = 
+                        PaymentTransactionConstants.PAYMENT_TRANSACTION_STATUS_FAILED;
+                    errorMessage = Label.Error_Internal_Server_Error;
+                }
+
+            } 
+            else {
+                refundPaymentTransactionInst.Status__c 
+                    = PaymentTransactionConstants.PAYMENT_TRANSACTION_STATUS_FAILED;
+                refundPaymentTransactionInst.Transaction_Id__c = null;
+                if (refundResp.errorInformation != null) {
+                    refundPaymentTransactionInst.Long_Description__c 
+                        = refundResp.errorInformation.message;
+                }else {
+                    refundPaymentTransactionInst.Long_Description__c 
+                        = refundResp.status;
+                }
+                errorMessage = Label.Error_Internal_Server_Error;
+            }
+            paymentTransactionDAOInstance.insertPaymentTransactions(
+                new List<Payment_Transaction__c>{refundPaymentTransactionInst});
+            
+            if(refundPaymentTransactionInst.Status__c ==
+                PaymentTransactionConstants.PAYMENT_TRANSACTION_STATUS_SUCCESS){
+                TrainingCybersourceWebService.insertAccountPaymentForCancellation(
+                    refundPaymentTransactionInst);
+                enrollmentRec.Status__c = VTUSAConstants.ENROLLMENT_CANCELLED_STATUS;
+                enrollmentRec.Is_RD_Created__c = false;
+                enrollmentDAOInstance.upsertEnrollmentRecordList(new List<Enrollment__c>{enrollmentRec}) ;
+            }else{
+                throw new AuraHandledException(errorMessage);
+            }
+        } catch(Exception ex) {
+            ex = UtilityDAO.getBaseDAOPrimaryException(ex);
+            TWGSystemErrors.insertTwgSystemError(TWGSystemErrors.Application.VTUSA, null,
+                'Cybersource', false, ex, TrainingEventController.Class.getName(),
+                'processEnrollmentRefund');
+        }
+    }
+
+    public class RefundResponse {
+        public ClientReferenceInformation clientReferenceInformation;
+        public String id;
+        public OrderInformation orderInformation;
+        public ProcessorInformation processorInformation;
+        public String reconciliationId;
+        public RefundAmountDetails refundAmountDetails;
+        public String status;
+        public Datetime submitTimeUtc;
+        public ErrorInformation errorInformation;
+    }
+
+
+    public class ClientReferenceInformation {
+        public String code;
+    }
+
+    public class OrderInformation {
+        public AmountDetails amountDetails;
+    }
+
+    public class AmountDetails {
+        public String currencyCode;
+
+        public void setCurrency(String value) {
+            this.currencyCode = value;
+        }
+    }
+
+    public class ProcessorInformation {
+        public String approvalCode;
+        public String responseCode;
+    }
+
+    public class RefundAmountDetails {
+        public String currencyCode;  
+        public Decimal refundAmount;
+
+        public void setCurrency(String value) {
+            this.currencyCode = value;
+        }
+    }
+    public class ErrorInformation {
+        public String reason;
+        public String message;
+    }
+}
