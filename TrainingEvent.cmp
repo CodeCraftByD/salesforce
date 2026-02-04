@@ -1,0 +1,9 @@
+<aura:component controller="TrainingEventController"
+    implements="flexipage:availableForAllPageTypes,force:hasRecordId,lightning:actionOverride,lightning:hasPageReference" access="global" >
+    
+    <lightning:workspaceAPI aura:id="workspace" />
+    <lightning:navigation aura:id="navService"/>
+    <aura:handler name="init" value="{!this}" action="{!c.init}" />
+    
+    <lightning:flow aura:id="flowData" onstatuschange="{!c.statusChange}"/>
+</aura:component>
