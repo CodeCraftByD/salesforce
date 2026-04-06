@@ -1,0 +1,43 @@
+<apex:page standardController="Case" recordSetVar="Cases" extensions="CaseMergeService" showHeader="true" sidebar="false" lightningStylesheets="true" docType="html-5.0">
+    <div class="slds-p-around_large slds-align_absolute-center">
+        <div role="status" class="slds-spinner slds-spinner_medium slds-spinner_brand">
+            <span class="slds-assistive-text">Loading</span>
+            <div class="slds-spinner__dot-a"></div>
+            <div class="slds-spinner__dot-b"></div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var backUrl = '/lightning/o/Case/list?filterName=__Recent';
+
+            function failAndBack(message) {
+                alert(message);
+                window.location.replace(backUrl);
+            }
+
+            // IDs from StandardSetController selection
+            var idsCsv = '{!JSENCODE(selectedCaseIdsCsv)}';
+
+            if (!idsCsv) {
+                failAndBack('No cases selected.');
+                return;
+            }
+
+            var ids = idsCsv.split(',').map(s => s.trim()).filter(Boolean);
+
+            if (ids.length < 2) {
+                failAndBack('Select at least 2 cases to merge.');
+                return;
+            }
+            if (ids.length > 3) {
+                failAndBack('You can merge a maximum of 3 cases.');
+                return;
+            }
+
+            // Construct the URL to the LWC
+            var lightningUrl = '/lightning/n/Case_Merge?c__recordIds=' + encodeURIComponent(ids.join(','));
+            window.location.assign(lightningUrl);
+        })();
+    </script>
+</apex:page>
