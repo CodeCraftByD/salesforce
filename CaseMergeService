@@ -1,0 +1,201 @@
+public class CaseMergeService {
+    public List<Id> selectedCaseIds { get; private set; }
+    
+    public CaseMergeService(ApexPages.StandardSetController ssc) {
+        selectedCaseIds = new List<Id>();
+        
+        List<SObject> selected = ssc.getSelected();
+        for (SObject s : selected) {
+            selectedCaseIds.add((Id)s.get('Id'));
+        }
+    }
+    
+    public String getSelectedCaseIdsCsv() {
+        if (selectedCaseIds == null || selectedCaseIds.isEmpty()) return '';
+        List<String> out = new List<String>();
+        for (Id i : selectedCaseIds) out.add((String)i);
+        return String.join(out, ',');
+    }
+    
+    private static final Boolean BLOCK_CLOSED_CASES = true;
+    
+    public class MergeFieldOption {
+        @AuraEnabled public String apiName;
+        @AuraEnabled public String label;
+        @AuraEnabled public String type;
+        public MergeFieldOption(String apiName, String label, String type) {
+            this.apiName = apiName; this.label = label; this.type = type;
+        }
+    }
+    
+    public class MergeCaseDTO {
+        @AuraEnabled public Id id;
+        @AuraEnabled public String caseNumber;
+        @AuraEnabled public String subject;
+        @AuraEnabled public String status;
+        @AuraEnabled public Map<String, String> fieldValues;
+        
+        public MergeCaseDTO(Case c, List<MergeFieldOption> fields) {
+            id = c.Id;
+            caseNumber = c.CaseNumber;
+            subject = c.Subject;
+            status = c.Status;
+            
+            fieldValues = new Map<String, String>();
+            for (MergeFieldOption f : fields) {
+                Object v = c.get(f.apiName);
+                fieldValues.put(f.apiName, v == null ? '' : String.valueOf(v));
+            }
+        }
+    }
+    
+    public class MergeInitResponse {
+        @AuraEnabled public List<MergeFieldOption> fields;
+        @AuraEnabled public List<MergeCaseDTO> cases;
+    }
+    
+    public class MergeResultDTO {
+        @AuraEnabled public Id masterCaseId;
+        @AuraEnabled public List<Id> mergedCaseIds;
+        @AuraEnabled public String message;
+    }
+    
+    @AuraEnabled(cacheable=true)
+    public static MergeInitResponse getCasesForMerge(List<Id> caseIds) {
+        enforcePermission();
+        
+        if (caseIds == null || caseIds.isEmpty()) throw new AuraHandledException('No cases were selected.');
+        if (caseIds.size() > 3) throw new AuraHandledException('You can merge a maximum of 3 cases.');
+        
+        List<MergeFieldOption> fields = defaultFieldsForCompare();
+        
+        Set<String> fieldApiNames = new Set<String>{'Id','CaseNumber','Subject','Status','IsClosed','AccountId','ContactId'};
+            for (MergeFieldOption f : fields) fieldApiNames.add(f.apiName);
+        
+        String soql = 'SELECT ' + String.join(new List<String>(fieldApiNames), ',') + ' FROM Case WHERE Id IN :caseIds';
+        List<Case> cases = Database.query(soql);
+        
+        if (cases.size() != caseIds.size()) throw new AuraHandledException('One or more selected cases could not be loaded.');
+        
+        validateCases(cases);
+        
+        MergeInitResponse resp = new MergeInitResponse();
+        resp.fields = fields;
+        resp.cases = new List<MergeCaseDTO>();
+        for (Case c : cases) resp.cases.add(new MergeCaseDTO(c, fields));
+        return resp;
+    }
+    
+    @AuraEnabled
+    public static MergeResultDTO mergeCases(
+        Id masterCaseId,
+        List<Id> duplicateCaseIds,
+        Map<String, String> selectedFieldValues
+    ) {
+        System.debug('masterCaseId '+masterCaseId);
+        System.debug('duplicateCaseIds '+duplicateCaseIds);
+        System.debug('selectedFieldValues '+selectedFieldValues);
+        enforcePermission();
+        
+        if (masterCaseId == null) throw new AuraHandledException('Principal (master) Case is required.');
+        if (duplicateCaseIds == null || duplicateCaseIds.isEmpty()) throw new AuraHandledException('At least one duplicate Case is required.');
+        if (duplicateCaseIds.size() > 2) throw new AuraHandledException('You can merge up to 2 duplicates (3 total cases).');
+        if (duplicateCaseIds.contains(masterCaseId)) throw new AuraHandledException('Master Case cannot be included in duplicate list.');
+        
+        Set<Id> allIds = new Set<Id>();
+        allIds.add(masterCaseId);
+        allIds.addAll(duplicateCaseIds);
+        
+        // Lock rows during merge
+        List<Case> loaded = [
+            SELECT Id, IsClosed, AccountId, ContactId
+            FROM Case
+            WHERE Id IN :allIds
+            FOR UPDATE
+        ];
+        if (loaded.size() != allIds.size()) throw new AuraHandledException('One or more cases could not be loaded for merge.');
+        
+        validateCases(loaded);
+        
+        // 1) Update master with chosen values so those win during merge
+        if (selectedFieldValues != null && !selectedFieldValues.isEmpty()) {
+            Case masterUpdate = new Case(Id = masterCaseId);
+            
+            // Use describe to avoid setting non-writable fields
+            Map<String, Schema.SObjectField> fmap = Schema.SObjectType.Case.fields.getMap();
+            
+            for (String apiName : selectedFieldValues.keySet()) {
+                System.debug('apiName '+apiName);
+                if (!fmap.containsKey(apiName)) continue;
+                
+                Schema.DescribeFieldResult d = fmap.get(apiName).getDescribe();
+                if (!d.isUpdateable()) continue;              
+                if (d.isCalculated()) continue;               
+                if (d.isAutoNumber()) continue;
+                
+                String raw = selectedFieldValues.get(apiName);
+                System.debug('raw '+raw);
+                
+                if (raw == null || raw.trim() == '') {
+                    masterUpdate.put(apiName, null);
+                } else {
+                    masterUpdate.put(apiName, raw);
+                }
+            }
+            
+            update masterUpdate;
+            System.debug('masterUpdate '+masterUpdate);
+        }
+        
+        // 2) Perform standard merge
+        Case master = new Case(Id = masterCaseId);
+        List<Case> dups = new List<Case>();
+        for (Id did : duplicateCaseIds) dups.add(new Case(Id = did));
+        
+        Database.MergeResult[] results = Database.merge(master, dups, false);
+        for(Database.MergeResult res : results){
+            if (!res.isSuccess()){
+                for(Database.Error err : res.getErrors()) {
+                    System.debug('error '+err.getMessage());
+                }
+                throw new AuraHandledException('Merge failed due to an unknown error.');
+            }
+        }
+        
+        
+        MergeResultDTO out = new MergeResultDTO();
+        out.masterCaseId = masterCaseId;
+        out.mergedCaseIds = new List<Id>(duplicateCaseIds);
+        out.message = 'Cases merged successfully.';
+        return out;
+    }
+    
+    private static void enforcePermission() {
+        if (!FeatureManagement.checkPermission('Merge_Cases')) {
+            throw new AuraHandledException('You do not have permission to merge cases.');
+        }
+    }
+    
+    private static void validateCases(List<Case> cases) {
+        if (cases == null || cases.size() < 2) throw new AuraHandledException('Select at least 2 cases to merge.');
+        if (cases.size() > 3) throw new AuraHandledException('You can merge a maximum of 3 cases.');
+        
+        if (BLOCK_CLOSED_CASES) {
+            for (Case c : cases) if (c.IsClosed) throw new AuraHandledException('Closed cases cannot be merged.');
+        }
+    }
+    
+    private static List<MergeFieldOption> defaultFieldsForCompare() {
+        return new List<MergeFieldOption>{
+            new MergeFieldOption('Status', 'Status', 'Picklist'),
+                new MergeFieldOption('Origin', 'Case Origin', 'Picklist'),
+                new MergeFieldOption('Priority', 'Priority', 'Picklist'),
+                new MergeFieldOption('Type', 'Type', 'Picklist'),
+                new MergeFieldOption('Reason', 'Reason', 'Picklist'),
+                new MergeFieldOption('SuppliedEmail', 'Supplied Email', 'Email'),
+                new MergeFieldOption('SuppliedPhone', 'Supplied Phone', 'Phone'),
+                new MergeFieldOption('Subject', 'Subject', 'Text'),
+                new MergeFieldOption('Description', 'Description', 'LongTextArea')
+                };
+                    }
+}
