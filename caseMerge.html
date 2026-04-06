@@ -1,0 +1,117 @@
+<template>
+    <lightning-card title="Merge Cases">
+        <template if:true={loading}>
+            <div class="slds-p-around_medium">
+                <lightning-spinner alternative-text="Loading"></lightning-spinner>
+            </div>
+        </template>
+
+        <template if:false={loading}>
+            <template if:true={error}>
+                <div class="slds-p-around_medium slds-text-color_error">{error}</div>
+            </template>
+
+            <template if:true={hasData}>
+                <div class="slds-p-around_medium">
+                    <div class="title">Compare cases</div>
+                    <div class="subtitle">
+                        When you merge cases, the principal record is updated with the field values you choose.
+                        All related lists and child records are merged into the principal record.
+                    </div>
+
+                    <div class="slds-scrollable_x">
+                        <table class="slds-table slds-table_cell-buffer slds-table_bordered merge-table">
+                            <thead>
+                                <tr>
+                                    <th class="field-col">PRINCIPAL RECORD</th>
+
+                                    <template for:each={caseColumns} for:item="col">
+                                        <th key={col.id} class="case-col">
+                                            <div class="slds-grid slds-grid_vertical slds-grid_align-center">
+                                                <a class="select-all" href="javascript:void(0)" data-id={col.id}
+                                                    onclick={handleSelectAll}>
+                                                    Select All
+                                                </a>
+
+                                                <div class="slds-m-top_small">
+                                                    <lightning-input type="radio" name="principal"
+                                                        label="Use as principal" value={col.id}
+                                                        checked={col.isPrincipal} onchange={handlePrincipalChange}>
+                                                    </lightning-input>
+                                                </div>
+                                            </div>
+                                        </th>
+                                    </template>
+                                </tr>
+
+                                <tr>
+                                    <th class="field-col">CASE NUMBER</th>
+                                    <template for:each={caseColumns} for:item="col">
+                                        <th key={col.id} class="case-col">
+                                            <a href="javascript:void(0)" data-id={col.id}
+                                                onclick={openCase}>{col.caseNumber}</a>
+                                        </th>
+                                    </template>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                <template for:each={rows} for:item="r">
+                                    <tr key={r.apiName}>
+                                        <td class="field-col">{r.label}</td>
+
+                                        <template for:each={r.options} for:item="opt">
+                                            <td key={opt.caseId} class="case-col">
+                                                <div class="option">
+                                                    <input type="radio"
+                                                           name={r.apiName}
+                                                           data-field={r.apiName}
+                                                           value={opt.caseId}
+                                                           checked={opt.selected}
+                                                           onchange={handleFieldPick}/>
+                                                    <span class="val" title={opt.value}>{opt.value}</span>
+                                                </div>
+                                            </td>
+                                        </template>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </template>
+
+            <div class="slds-m-top_large slds-grid slds-grid_align-center slds-gutters_small">
+                        <div class="slds-col">
+                            <lightning-button variant="neutral" label="Cancel" onclick={handleCancel}>
+                            </lightning-button>
+                        </div>
+                        <div class="slds-col">
+                            <lightning-button variant="brand" label="Merge" onclick={confirmMerge}
+                                disabled={mergeDisabled}></lightning-button>
+                        </div>
+                    </div>
+            
+        </template>
+    </lightning-card>
+
+    <template if:true={showConfirm}>
+        <section role="dialog" tabindex="-1" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container">
+                <header class="slds-modal__header">
+                    <h2 class="slds-text-heading_medium">Confirm Merge</h2>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium">
+                    This will update the principal case with your selected values, move related records, and close
+                    duplicates. Continue?
+                </div>
+                <footer class="slds-modal__footer slds-grid slds-grid_align-end">
+                    <lightning-button label="Cancel" onclick={closeConfirm}></lightning-button>
+                    <lightning-button class="slds-m-left_small" variant="brand" label="Merge" onclick={doMerge}>
+                    </lightning-button>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+</template>
